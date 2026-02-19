@@ -13,6 +13,7 @@ import {
 import { useCallback, useEffect, useState } from 'react'
 
 import { useAuth } from '../lib/auth'
+import { getEmailDomain, securityDebugLog } from '../lib/security-debug'
 import { supabase } from '../lib/supabase'
 import type { UserRole } from '../lib/auth'
 import { Button } from './ui/button'
@@ -43,10 +44,23 @@ export function SettingsView() {
   const loadUsers = useCallback(async () => {
     if (!supabase || !isAdmin) return
     setLoadingUsers(true)
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from('profiles')
       .select('*')
       .order('created_at', { ascending: true })
+
+    if (error) {
+      securityDebugLog('settings.load_users_failed', {
+        code: error.code,
+        message: error.message,
+      })
+    }
+
+    securityDebugLog('settings.load_users_result', {
+      isAdmin,
+      count: data?.length ?? 0,
+    })
+
     if (data) setUsers(data as ManagedUser[])
     setLoadingUsers(false)
   }, [isAdmin])
@@ -60,6 +74,12 @@ export function SettingsView() {
     setAdding(true)
     setAddError(null)
 
+    securityDebugLog('settings.add_user_attempt', {
+      byAdminId: profile?.id ?? null,
+      emailDomain: getEmailDomain(newEmail),
+      role: newRole,
+    })
+
     const { error } = await supabase.auth.signUp({
       email: newEmail,
       password: newPassword,
@@ -69,8 +89,20 @@ export function SettingsView() {
     })
 
     if (error) {
+      securityDebugLog('settings.add_user_failed', {
+        byAdminId: profile?.id ?? null,
+        emailDomain: getEmailDomain(newEmail),
+        role: newRole,
+        code: error.code,
+        message: error.message,
+      })
       setAddError(error.message)
     } else {
+      securityDebugLog('settings.add_user_success', {
+        byAdminId: profile?.id ?? null,
+        emailDomain: getEmailDomain(newEmail),
+        role: newRole,
+      })
       setShowAddForm(false)
       setNewEmail('')
       setNewName('')
@@ -85,7 +117,22 @@ export function SettingsView() {
   const handleDeleteUser = async (userId: string) => {
     if (!supabase || userId === profile?.id) return
     // Only delete the profile - the auth user remains but can't access
-    await supabase.from('profiles').delete().eq('id', userId)
+    const { error } = await supabase.from('profiles').delete().eq('id', userId)
+    if (error) {
+      securityDebugLog('settings.delete_user_failed', {
+        byAdminId: profile?.id ?? null,
+        targetUserId: userId,
+        code: error.code,
+        message: error.message,
+      })
+      return
+    }
+
+    securityDebugLog('settings.delete_user_success', {
+      byAdminId: profile?.id ?? null,
+      targetUserId: userId,
+    })
+
     setUsers((prev) => prev.filter((u) => u.id !== userId))
   }
 

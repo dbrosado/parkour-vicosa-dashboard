@@ -2,6 +2,7 @@ import {
   Cake,
   CalendarDays,
   CreditCard,
+  FileBarChart,
   GraduationCap,
   Rocket,
   Settings,
@@ -26,7 +27,8 @@ const menuItems = [
   { id: 'progress', label: 'Progresso', shortLabel: 'Progresso', icon: TrendingUp },
   { id: 'events', label: 'Eventos', shortLabel: 'Eventos', icon: Rocket },
   { id: 'finance', label: 'Financeiro', shortLabel: 'Finan.', icon: CreditCard },
-  { id: 'birthdays', label: 'Aniversários', shortLabel: 'Aniver.', icon: Cake },
+  { id: 'reports', label: 'Relatorios', shortLabel: 'Relat.', icon: FileBarChart },
+  { id: 'birthdays', label: 'Aniversarios', shortLabel: 'Aniver.', icon: Cake },
   { id: 'settings', label: 'Configurações', shortLabel: 'Ajustes', icon: Settings },
 ] as const satisfies Array<{
   id: AppSection

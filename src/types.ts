@@ -7,6 +7,7 @@ export type AppSection =
   | 'events'
   | 'finance'
   | 'birthdays'
+  | 'reports'
   | 'settings'
 
 export type WeekdayKey =
@@ -147,5 +148,24 @@ export interface ClassNote {
   slotId: string
   date: string
   content: string
+  createdAt: string
+}
+
+export type ExpenseCategory =
+  | 'aluguel'
+  | 'salarios'
+  | 'energia'
+  | 'agua'
+  | 'materiais'
+  | 'manutencao'
+  | 'marketing'
+  | 'outros'
+
+export interface OperationalExpense {
+  id: string
+  description: string
+  amount: number
+  category: ExpenseCategory
+  monthReference: string
   createdAt: string
 }

@@ -4,10 +4,12 @@ import { format } from 'date-fns'
 import {
     type Instructor,
     type Student,
-    type AttendanceStatus
+    type AttendanceStatus,
+    type OperationalExpense,
 } from '../types'
 import { initialInstructors, initialStudents, initialWeeklyAssignments } from '../data/mock-data'
 import { getScheduleForDay, getWeekdayKey } from '../data/schedule'
+import { securityDebugLog } from '../lib/security-debug'
 import { supabase } from '../lib/supabase'
 
 interface DashboardState {
@@ -26,6 +28,9 @@ interface DashboardState {
     // date string (YYYY-MM-DD) -> studentId -> AttendanceStatus
     dailyAttendance: Record<string, Record<string, AttendanceStatus>>
 
+    // Operational expenses
+    operationalExpenses: OperationalExpense[]
+
     // Actions
     addStudent: (student: Student) => void
     updateStudent: (student: Student) => void
@@ -33,6 +38,11 @@ interface DashboardState {
     setAttendance: (date: string, studentId: string, status: AttendanceStatus) => void
     setAssignment: (date: string, slotId: string, studentIds: string[]) => void
     moveStudent: (date: string, studentId: string, fromSlotId: string, toSlotId: string) => void
+
+    // Expenses
+    addExpense: (expense: OperationalExpense) => void
+    updateExpense: (expense: OperationalExpense) => void
+    deleteExpense: (expenseId: string) => void
 
     // Supabase sync
     loadFromSupabase: () => Promise<void>
@@ -47,21 +57,44 @@ interface DashboardState {
 
 async function sbUpsertStudent(student: Student) {
     if (!supabase) return
-    await supabase
+    const { error } = await supabase
         .from('students')
         .upsert({ id: student.id, data: student, updated_at: new Date().toISOString() })
+
+    if (error) {
+        securityDebugLog('store.student_upsert_failed', {
+            studentId: student.id,
+            code: error.code,
+            message: error.message,
+        })
+    }
 }
 
 async function sbDeleteStudent(studentId: string) {
     if (!supabase) return
-    await supabase.from('students').delete().eq('id', studentId)
+    const { error } = await supabase.from('students').delete().eq('id', studentId)
+    if (error) {
+        securityDebugLog('store.student_delete_failed', {
+            studentId,
+            code: error.code,
+            message: error.message,
+        })
+    }
 }
 
 async function sbSaveAppState(key: string, data: unknown) {
     if (!supabase) return
-    await supabase
+    const { error } = await supabase
         .from('app_state')
         .upsert({ key, data, updated_at: new Date().toISOString() })
+
+    if (error) {
+        securityDebugLog('store.app_state_upsert_failed', {
+            key,
+            code: error.code,
+            message: error.message,
+        })
+    }
 }
 
 // ─── Store ─────────────────────────────────────────────────────────
@@ -78,22 +111,35 @@ export const useStore = create<DashboardState>()(
 
             dailyAssignments: {},
             dailyAttendance: {},
+            operationalExpenses: [],
 
             // ── Load data from Supabase ─────────────────────────────
             loadFromSupabase: async () => {
                 if (!supabase) {
+                    securityDebugLog('store.load_from_supabase_skipped_offline_mode')
                     set({ hydrated: true })
                     return
                 }
 
                 try {
-                    const [studentsRes, instructorsRes, assignmentsRes, attendanceRes] =
+                    const [studentsRes, instructorsRes, assignmentsRes, attendanceRes, expensesRes] =
                         await Promise.all([
                             supabase.from('students').select('id, data'),
                             supabase.from('instructors').select('id, data'),
                             supabase.from('app_state').select('data').eq('key', 'daily_assignments').single(),
                             supabase.from('app_state').select('data').eq('key', 'daily_attendance').single(),
+                            supabase.from('app_state').select('data').eq('key', 'operational_expenses').single(),
                         ])
+
+                    securityDebugLog('store.load_from_supabase_response', {
+                        studentsError: studentsRes.error?.message ?? null,
+                        instructorsError: instructorsRes.error?.message ?? null,
+                        assignmentsError: assignmentsRes.error?.message ?? null,
+                        attendanceError: attendanceRes.error?.message ?? null,
+                        expensesError: expensesRes.error?.message ?? null,
+                        studentsCount: studentsRes.data?.length ?? 0,
+                        instructorsCount: instructorsRes.data?.length ?? 0,
+                    })
 
                     const updates: Partial<DashboardState> = { hydrated: true }
 
@@ -119,9 +165,16 @@ export const useStore = create<DashboardState>()(
                             .data as Record<string, Record<string, AttendanceStatus>>
                     }
 
+                    if (expensesRes.data?.data && Array.isArray(expensesRes.data.data)) {
+                        updates.operationalExpenses = expensesRes.data.data as OperationalExpense[]
+                    }
+
                     set(updates)
                 } catch (err) {
                     console.error('Failed to load from Supabase:', err)
+                    securityDebugLog('store.load_from_supabase_exception', {
+                        message: err instanceof Error ? err.message : String(err),
+                    })
                     set({ hydrated: true })
                 }
             },
@@ -144,6 +197,32 @@ export const useStore = create<DashboardState>()(
                     students: state.students.map((s) => s.id === student.id ? student : s)
                 }))
                 sbUpsertStudent(student)
+            },
+
+            addExpense: (expense) => {
+                set((state) => {
+                    const updated = [expense, ...state.operationalExpenses]
+                    sbSaveAppState('operational_expenses', updated)
+                    return { operationalExpenses: updated }
+                })
+            },
+
+            updateExpense: (expense) => {
+                set((state) => {
+                    const updated = state.operationalExpenses.map(
+                        (e) => e.id === expense.id ? expense : e
+                    )
+                    sbSaveAppState('operational_expenses', updated)
+                    return { operationalExpenses: updated }
+                })
+            },
+
+            deleteExpense: (expenseId) => {
+                set((state) => {
+                    const updated = state.operationalExpenses.filter((e) => e.id !== expenseId)
+                    sbSaveAppState('operational_expenses', updated)
+                    return { operationalExpenses: updated }
+                })
             },
 
             deleteStudent: (studentId) => {
@@ -224,6 +303,7 @@ export const useStore = create<DashboardState>()(
                 students: state.students,
                 dailyAssignments: state.dailyAssignments,
                 dailyAttendance: state.dailyAttendance,
+                operationalExpenses: state.operationalExpenses,
             }),
         }
     )

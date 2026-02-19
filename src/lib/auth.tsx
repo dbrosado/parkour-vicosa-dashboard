@@ -8,6 +8,7 @@ import {
   useState,
   type ReactNode,
 } from 'react'
+import { getEmailDomain, securityDebugLog } from './security-debug'
 import { supabase } from './supabase'
 
 export type UserRole = 'admin' | 'instructor'
@@ -38,24 +39,52 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const fetchProfile = useCallback(async (userId: string) => {
     if (!supabase) return null
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from('profiles')
       .select('*')
       .eq('id', userId)
       .single()
+
+    if (error) {
+      securityDebugLog('auth.profile_fetch_failed', {
+        userId,
+        code: error.code,
+        message: error.message,
+      })
+      return null
+    }
+
+    securityDebugLog('auth.profile_loaded', {
+      userId,
+      role: (data as Profile | null)?.role ?? null,
+    })
+
     return data as Profile | null
   }, [])
 
   useEffect(() => {
     if (!supabase) {
+      securityDebugLog('auth.supabase_unconfigured_offline_mode')
       setLoading(false)
       return
     }
 
+    securityDebugLog('auth.session_init_start')
+
     supabase.auth.getSession().then(async ({ data: { session: s } }) => {
+      securityDebugLog('auth.session_init_result', {
+        hasSession: Boolean(s),
+        userId: s?.user?.id ?? null,
+      })
+
       setSession(s)
       if (s?.user) {
         const p = await fetchProfile(s.user.id)
+        if (!p) {
+          securityDebugLog('auth.profile_missing_after_session_init', {
+            userId: s.user.id,
+          })
+        }
         setProfile(p)
       }
       setLoading(false)
@@ -64,9 +93,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange(async (_event, s) => {
+      securityDebugLog('auth.state_change', {
+        event: _event,
+        hasSession: Boolean(s),
+        userId: s?.user?.id ?? null,
+      })
+
       setSession(s)
       if (s?.user) {
         const p = await fetchProfile(s.user.id)
+        if (!p) {
+          securityDebugLog('auth.profile_missing_after_state_change', {
+            userId: s.user.id,
+            event: _event,
+          })
+        }
         setProfile(p)
       } else {
         setProfile(null)
@@ -79,10 +120,29 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const signIn = useCallback(
     async (email: string, password: string) => {
       if (!supabase) return { error: 'Supabase not configured' }
-      const { error } = await supabase.auth.signInWithPassword({
+
+      securityDebugLog('auth.sign_in_attempt', {
+        emailDomain: getEmailDomain(email),
+      })
+
+      const { data, error } = await supabase.auth.signInWithPassword({
         email,
         password,
       })
+
+      if (error) {
+        securityDebugLog('auth.sign_in_failed', {
+          emailDomain: getEmailDomain(email),
+          code: error.code,
+          status: error.status,
+          message: error.message,
+        })
+      } else {
+        securityDebugLog('auth.sign_in_success', {
+          userId: data.user?.id ?? null,
+        })
+      }
+
       return { error: error?.message ?? null }
     },
     [],
@@ -91,6 +151,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const signOut = useCallback(async () => {
     if (!supabase) return
     await supabase.auth.signOut()
+    securityDebugLog('auth.sign_out')
     setSession(null)
     setProfile(null)
   }, [])

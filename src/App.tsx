@@ -8,6 +8,7 @@ import { FinanceView } from './components/finance-view'
 import { InstructorView } from './components/instructor-view'
 import { LoginPage } from './components/login-page'
 import { ProgressView } from './components/progress-view'
+import { ReportsView } from './components/reports-view'
 import { SettingsView } from './components/settings-view'
 import { MobileBottomNav, MobileTopBar, Sidebar } from './components/sidebar'
 import { StudentsTable } from './components/students-table'
@@ -44,6 +45,10 @@ const sectionCopy: Record<AppSection, { title: string; subtitle: string }> = {
   finance: {
     title: 'Controle Financeiro',
     subtitle: 'Gestao de mensalidades, cobrancas e formas de pagamento.',
+  },
+  reports: {
+    title: 'Relatorios & Analises',
+    subtitle: 'Visao geral, financeiro, evolucao dos alunos e impressao de relatorios.',
   },
   birthdays: {
     title: 'Aniversariantes',
@@ -102,6 +107,8 @@ function App() {
         return <EventsBoard />
       case 'finance':
         return <FinanceView students={students} onUpdateStudent={updateStudent} />
+      case 'reports':
+        return <ReportsView />
       case 'birthdays':
         return <BirthdayView students={students} />
       case 'settings':
