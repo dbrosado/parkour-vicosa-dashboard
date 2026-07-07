@@ -535,7 +535,7 @@ export function CrmWhatsAppView() {
     try {
       setSnapshot(await whatsappProvider.getStatus())
     } catch {
-      setSnapshot({ status: 'error', error: 'Servidor local do WhatsApp não está rodando. Abra um terminal na pasta do projeto e rode: npm run whatsapp' })
+      setSnapshot({ status: 'error', error: 'O servidor local do WhatsApp não respondeu. Feche e abra o painel de novo (npm run dev) — ele sobe junto automaticamente.' })
     } finally {
       setLoading(false)
     }
@@ -564,7 +564,7 @@ export function CrmWhatsAppView() {
     try {
       setSnapshot(await whatsappProvider.connect())
     } catch {
-      setSnapshot({ status: 'error', error: 'Não foi possível iniciar a sessão. Confira se o servidor local está rodando (npm run whatsapp).' })
+      setSnapshot({ status: 'error', error: 'Não foi possível iniciar a sessão. Feche e abra o painel de novo (npm run dev) e tente outra vez.' })
     } finally {
       setLoading(false)
     }
@@ -618,10 +618,10 @@ export function CrmWhatsAppView() {
           <CardHeader><CardTitle className="flex items-center gap-2 text-base"><Link2 className="h-4 w-4 text-emerald-400" />Como conectar</CardTitle></CardHeader>
           <CardContent className="space-y-3 text-sm text-white/75">
             <div className="space-y-2 text-xs text-muted-foreground">
-              <p>1. Abra um terminal na pasta do projeto e rode <code className="rounded bg-black/30 px-1.5 py-0.5 text-emerald-300">npm run whatsapp</code> (ou use <code className="rounded bg-black/30 px-1.5 py-0.5 text-emerald-300">npm run dev:full</code> para subir tudo junto).</p>
-              <p>2. Clique em <strong className="text-white/80">Gerar QR Code</strong> e aguarde o código aparecer.</p>
-              <p>3. No celular: WhatsApp → Configurações → Dispositivos conectados → Conectar dispositivo, e aponte a câmera para o QR.</p>
-              <p>4. A sessão fica salva neste computador — nas próximas vezes conecta sozinho, sem QR.</p>
+              <p>1. Clique em <strong className="text-white/80">Gerar QR Code</strong> e aguarde o código aparecer (o servidor sobe junto com o painel, nada para instalar ou rodar à parte).</p>
+              <p>2. No celular: WhatsApp → Configurações → Dispositivos conectados → Conectar dispositivo, e aponte a câmera para o QR.</p>
+              <p>3. A sessão fica salva neste computador — nas próximas vezes conecta sozinho, sem QR.</p>
+              <p>4. Se aparecer erro de conexão, feche e abra o painel de novo (<code className="rounded bg-black/30 px-1.5 py-0.5 text-emerald-300">npm run dev</code>).</p>
             </div>
           </CardContent>
         </Card>

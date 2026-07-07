@@ -6,7 +6,6 @@
   "scripts": {
     "dev": "vite",
     "whatsapp": "node server/whatsapp-server.mjs",
-    "dev:full": "node server/whatsapp-server.mjs & vite",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "preview": "vite preview"

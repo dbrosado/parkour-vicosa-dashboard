@@ -4,7 +4,7 @@
  * Conecta ao WhatsApp Web via Baileys — roda 100% nesta máquina, sem serviços
  * externos. A sessão fica salva em server/.wa-session (fora do git).
  *
- * Rodar: npm run whatsapp   (ou npm run dev:full para subir junto com o painel)
+ * Rodar: npm run dev   (sobe o painel e este servidor juntos)
  */
 import { createServer } from 'node:http'
 import { existsSync } from 'node:fs'
@@ -98,9 +98,40 @@ function json(res, status, data) {
   res.end(JSON.stringify(data))
 }
 
+function isAllowedOrigin(origin) {
+  if (!origin) return true
+
+  try {
+    const { hostname, protocol } = new URL(origin)
+    return (
+      (protocol === 'http:' || protocol === 'https:') &&
+      ['localhost', '127.0.0.1', '::1', '[::1]'].includes(hostname)
+    )
+  } catch {
+    return false
+  }
+}
+
 const server = createServer(async (req, res) => {
   const url = new URL(req.url ?? '/', 'http://localhost')
   const route = `${req.method} ${url.pathname}`
+  const origin = req.headers.origin
+  const allowedOrigin = isAllowedOrigin(origin) ? origin : null
+
+  // Permite o painel local falar direto com http://127.0.0.1:3901,
+  // mas bloqueia páginas externas de acionarem o WhatsApp local.
+  res.setHeader('Vary', 'Origin')
+  if (allowedOrigin) res.setHeader('Access-Control-Allow-Origin', allowedOrigin)
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type')
+  if (req.method === 'OPTIONS') {
+    res.writeHead(allowedOrigin ? 204 : 403)
+    res.end()
+    return
+  }
+  if (origin && !allowedOrigin) {
+    return json(res, 403, { error: 'Origem não autorizada para o servidor local do WhatsApp.' })
+  }
 
   try {
     if (route === 'GET /api/whatsapp/status') {
@@ -141,8 +172,16 @@ const server = createServer(async (req, res) => {
   }
 })
 
-server.listen(PORT, () => {
-  console.log(`[whatsapp] servidor local em http://localhost:${PORT}`)
+server.on('error', (err) => {
+  if (err.code === 'EADDRINUSE') {
+    console.log(`[whatsapp] porta ${PORT} já em uso — outro servidor do WhatsApp já está rodando, seguindo com ele.`)
+    process.exit(0)
+  }
+  throw err
+})
+
+server.listen(PORT, '127.0.0.1', () => {
+  console.log(`[whatsapp] servidor local em http://127.0.0.1:${PORT}`)
   // Se já existe sessão salva, reconecta direto sem pedir QR
   if (existsSync(join(SESSION_DIR, 'creds.json'))) {
     setSnapshot({ status: 'connecting' })

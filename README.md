@@ -60,13 +60,14 @@ O painel tem um servidor local de WhatsApp (`server/whatsapp-server.mjs`) que
 usa o mesmo mecanismo do WhatsApp Web — roda inteiro neste computador, sem
 serviços de terceiros.
 
-Para conectar:
+O servidor **sobe automaticamente junto com o painel** (`npm run dev` ou
+`npm run preview`) — não precisa rodar nada à parte. Para conectar:
 
-1. Rode `npm run whatsapp` em um terminal (ou `npm run dev:full` para subir
-   painel + WhatsApp juntos).
-2. No painel, abra **Conectar WhatsApp** e clique em **Gerar QR Code**.
-3. No celular: WhatsApp → Configurações → Dispositivos conectados → Conectar
+1. No painel, abra **Conectar WhatsApp** e clique em **Gerar QR Code**.
+2. No celular: WhatsApp → Configurações → Dispositivos conectados → Conectar
    dispositivo, e escaneie o QR.
+
+(Se quiser rodar o servidor sozinho, sem o painel: `npm run whatsapp`.)
 
 A sessão fica salva em `server/.wa-session/` (fora do git) — nas próximas
 vezes conecta sozinho. Com a sessão ativa, a Inbox envia mensagens direto pelo
@@ -79,8 +80,7 @@ painel; sem ela, continua o modo manual com histórico, templates e `wa.me`.
 
 ```bash
 npm install
-npm run dev        # só o painel
-npm run dev:full   # painel + servidor do WhatsApp
+npm run dev   # painel + servidor do WhatsApp (sobe tudo junto)
 ```
 
 Para gerar a versão de produção (pasta `dist/`, pode ser servida por qualquer
