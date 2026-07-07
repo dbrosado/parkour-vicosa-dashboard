@@ -1,177 +1,101 @@
-import type { Session, User } from '@supabase/supabase-js'
 import {
   createContext,
   useCallback,
   useContext,
-  useEffect,
   useMemo,
   useState,
   type ReactNode,
 } from 'react'
-import { getEmailDomain, securityDebugLog } from './security-debug'
-import { supabase } from './supabase'
 
-export type UserRole = 'admin' | 'instructor'
-
-interface Profile {
-  id: string
-  email: string
+export interface LocalUser {
+  username: string
   name: string
-  role: UserRole
 }
 
 interface AuthContextValue {
-  user: User | null
-  profile: Profile | null
-  session: Session | null
-  loading: boolean
-  isAdmin: boolean
-  signIn: (email: string, password: string) => Promise<{ error: string | null }>
-  signOut: () => Promise<void>
+  user: LocalUser | null
+  signIn: (username: string, password: string, remember: boolean) => Promise<{ error: string | null }>
+  signOut: () => void
+  changePassword: (currentPassword: string, newPassword: string) => Promise<{ error: string | null }>
+}
+
+const DEFAULT_USERNAME = 'danilo'
+// SHA-256 de "parkour2026" — senha padrão, alterável em Configurações
+const DEFAULT_PASSWORD_HASH = 'b8effb81d5a54efd99002c7555a909dd8ff38c769f6e544be4ba7110c6ac1e5b'
+
+const SESSION_KEY = 'pkv-auth-session'
+const PASSWORD_KEY = 'pkv-auth-password-hash'
+
+async function sha256Hex(value: string): Promise<string> {
+  const bytes = new TextEncoder().encode(value)
+  const digest = await crypto.subtle.digest('SHA-256', bytes)
+  return Array.from(new Uint8Array(digest))
+    .map((b) => b.toString(16).padStart(2, '0'))
+    .join('')
+}
+
+function storedPasswordHash(): string {
+  return localStorage.getItem(PASSWORD_KEY) || DEFAULT_PASSWORD_HASH
+}
+
+function readSession(): LocalUser | null {
+  const raw = sessionStorage.getItem(SESSION_KEY) || localStorage.getItem(SESSION_KEY)
+  if (!raw) return null
+  try {
+    return JSON.parse(raw) as LocalUser
+  } catch {
+    return null
+  }
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null)
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [session, setSession] = useState<Session | null>(null)
-  const [profile, setProfile] = useState<Profile | null>(null)
-  const [loading, setLoading] = useState(true)
+  // localStorage é síncrono, então a sessão já entra resolvida no primeiro render
+  const [user, setUser] = useState<LocalUser | null>(readSession)
 
-  const fetchProfile = useCallback(async (userId: string) => {
-    if (!supabase) return null
-    const { data, error } = await supabase
-      .from('profiles')
-      .select('*')
-      .eq('id', userId)
-      .single()
+  const signIn = useCallback(async (username: string, password: string, remember: boolean) => {
+    const normalized = username.trim().toLowerCase()
+    const passwordHash = await sha256Hex(password)
 
-    if (error) {
-      securityDebugLog('auth.profile_fetch_failed', {
-        userId,
-        code: error.code,
-        message: error.message,
-      })
-      return null
+    if (normalized !== DEFAULT_USERNAME || passwordHash !== storedPasswordHash()) {
+      return { error: 'Usuário ou senha incorretos.' }
     }
 
-    securityDebugLog('auth.profile_loaded', {
-      userId,
-      role: (data as Profile | null)?.role ?? null,
-    })
-
-    return data as Profile | null
+    const nextUser: LocalUser = { username: DEFAULT_USERNAME, name: 'Danilo' }
+    const storage = remember ? localStorage : sessionStorage
+    storage.setItem(SESSION_KEY, JSON.stringify(nextUser))
+    setUser(nextUser)
+    return { error: null }
   }, [])
 
-  useEffect(() => {
-    if (!supabase) {
-      securityDebugLog('auth.supabase_unconfigured_offline_mode')
-      setLoading(false)
-      return
+  const signOut = useCallback(() => {
+    sessionStorage.removeItem(SESSION_KEY)
+    localStorage.removeItem(SESSION_KEY)
+    setUser(null)
+  }, [])
+
+  const changePassword = useCallback(async (currentPassword: string, newPassword: string) => {
+    const currentHash = await sha256Hex(currentPassword)
+    if (currentHash !== storedPasswordHash()) {
+      return { error: 'Senha atual incorreta.' }
     }
-
-    securityDebugLog('auth.session_init_start')
-
-    supabase.auth.getSession().then(async ({ data: { session: s } }) => {
-      securityDebugLog('auth.session_init_result', {
-        hasSession: Boolean(s),
-        userId: s?.user?.id ?? null,
-      })
-
-      setSession(s)
-      if (s?.user) {
-        const p = await fetchProfile(s.user.id)
-        if (!p) {
-          securityDebugLog('auth.profile_missing_after_session_init', {
-            userId: s.user.id,
-          })
-        }
-        setProfile(p)
-      }
-      setLoading(false)
-    })
-
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange(async (_event, s) => {
-      securityDebugLog('auth.state_change', {
-        event: _event,
-        hasSession: Boolean(s),
-        userId: s?.user?.id ?? null,
-      })
-
-      setSession(s)
-      if (s?.user) {
-        const p = await fetchProfile(s.user.id)
-        if (!p) {
-          securityDebugLog('auth.profile_missing_after_state_change', {
-            userId: s.user.id,
-            event: _event,
-          })
-        }
-        setProfile(p)
-      } else {
-        setProfile(null)
-      }
-    })
-
-    return () => subscription.unsubscribe()
-  }, [fetchProfile])
-
-  const signIn = useCallback(
-    async (email: string, password: string) => {
-      if (!supabase) return { error: 'Supabase not configured' }
-
-      securityDebugLog('auth.sign_in_attempt', {
-        emailDomain: getEmailDomain(email),
-      })
-
-      const { data, error } = await supabase.auth.signInWithPassword({
-        email,
-        password,
-      })
-
-      if (error) {
-        securityDebugLog('auth.sign_in_failed', {
-          emailDomain: getEmailDomain(email),
-          code: error.code,
-          status: error.status,
-          message: error.message,
-        })
-      } else {
-        securityDebugLog('auth.sign_in_success', {
-          userId: data.user?.id ?? null,
-        })
-      }
-
-      return { error: error?.message ?? null }
-    },
-    [],
-  )
-
-  const signOut = useCallback(async () => {
-    if (!supabase) return
-    await supabase.auth.signOut()
-    securityDebugLog('auth.sign_out')
-    setSession(null)
-    setProfile(null)
+    if (newPassword.length < 6) {
+      return { error: 'A nova senha precisa ter pelo menos 6 caracteres.' }
+    }
+    localStorage.setItem(PASSWORD_KEY, await sha256Hex(newPassword))
+    return { error: null }
   }, [])
 
   const value = useMemo<AuthContextValue>(
-    () => ({
-      user: session?.user ?? null,
-      profile,
-      session,
-      loading,
-      isAdmin: profile?.role === 'admin',
-      signIn,
-      signOut,
-    }),
-    [session, profile, loading, signIn, signOut],
+    () => ({ user, signIn, signOut, changePassword }),
+    [user, signIn, signOut, changePassword],
   )
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
 }
 
+// eslint-disable-next-line react-refresh/only-export-components -- hook e provider compartilham o contexto
 export function useAuth() {
   const ctx = useContext(AuthContext)
   if (!ctx) throw new Error('useAuth must be used within AuthProvider')

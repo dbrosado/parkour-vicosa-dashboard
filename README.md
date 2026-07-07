@@ -1,73 +1,91 @@
-# React + TypeScript + Vite
+# Parkour Viçosa CRM & Gestão
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+Dashboard operacional e comercial da Parkour Viçosa. Funciona **100% local**:
+sem Supabase, sem serviços externos — todos os dados ficam no navegador deste
+computador (`localStorage`) e as fontes são auto-hospedadas, então o painel
+abre até sem internet.
 
-Currently, two official plugins are available:
+## Acesso
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) (or [oxc](https://oxc.rs) when used in [rolldown-vite](https://vite.dev/guide/rolldown)) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+O painel tem uma tela de login local (sem servidor):
 
-## React Compiler
+- **Usuário:** `danilo`
+- **Senha:** `parkour2026`
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+A senha pode ser alterada em **Configurações → Conta Local**. Marque
+"Manter conectado" no login para não precisar entrar de novo a cada sessão.
 
-## Expanding the ESLint configuration
+> Atenção: como o app é totalmente local, o login é uma trava de conveniência
+> contra uso casual do computador — não é criptografia dos dados.
 
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
+## Dados iniciais
 
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
+O repositório público vem apenas com dados fictícios de demonstração. Cadastros
+reais de alunos, responsáveis e leads devem ser feitos no navegador local ou
+restaurados por backup JSON em **Configurações → Backup dos Dados**.
 
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
+## Backup dos dados
 
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+Como tudo fica no `localStorage` do navegador, limpar os dados de navegação
+apaga o painel. Em **Configurações → Backup dos Dados** você pode:
+
+- **Exportar backup (.json)** — baixa um arquivo com alunos, leads, presenças,
+  finanças e todo o CRM. Faça isso regularmente.
+- **Importar backup** — restaura um arquivo exportado (substitui os dados atuais).
+- **Zerar dados** — volta ao estado inicial de demonstração.
+
+## CRM disponível
+
+- Central comercial com prioridades, métricas e funil.
+- Cadastro completo de leads com consentimento LGPD e bloqueio de contato.
+- Pipeline Kanban com histórico e tarefas automáticas por etapa.
+- Ficha individual com mensagens, notas, tarefas, experimentais e recomendação.
+- Aulas experimentais com presença, feedback, plano e pedido de matrícula.
+- Conversão de lead em aluno com checklist de onboarding.
+- Inbox manual, templates de WhatsApp e abertura da conversa por `wa.me`.
+- Relatórios de conversão, origens e disciplina comercial.
+
+## Operação da academia
+
+- Visão diária com check-in e remanejamento de turmas em drag-and-drop.
+- Visão semanal de ocupação e grade de horários.
+- Cadastro de alunos, professores e escala da equipe.
+- Check-up do traceur: avaliação física, Big Six e árvore de habilidades.
+- Pipeline de eventos, controle financeiro e relatórios em PDF.
+- Aniversariantes do mês.
+
+## WhatsApp conectado ao painel
+
+O painel tem um servidor local de WhatsApp (`server/whatsapp-server.mjs`) que
+usa o mesmo mecanismo do WhatsApp Web — roda inteiro neste computador, sem
+serviços de terceiros.
+
+Para conectar:
+
+1. Rode `npm run whatsapp` em um terminal (ou `npm run dev:full` para subir
+   painel + WhatsApp juntos).
+2. No painel, abra **Conectar WhatsApp** e clique em **Gerar QR Code**.
+3. No celular: WhatsApp → Configurações → Dispositivos conectados → Conectar
+   dispositivo, e escaneie o QR.
+
+A sessão fica salva em `server/.wa-session/` (fora do git) — nas próximas
+vezes conecta sozinho. Com a sessão ativa, a Inbox envia mensagens direto pelo
+painel; sem ela, continua o modo manual com histórico, templates e `wa.me`.
+
+> Evite envios em massa: o WhatsApp pode restringir números com comportamento
+> de spam. Use para responder leads que iniciaram contato.
+
+## Desenvolvimento
+
+```bash
+npm install
+npm run dev        # só o painel
+npm run dev:full   # painel + servidor do WhatsApp
 ```
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+Para gerar a versão de produção (pasta `dist/`, pode ser servida por qualquer
+servidor de arquivos estáticos, ou aberta com `npm run preview`):
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
-
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+```bash
+npm run build
 ```

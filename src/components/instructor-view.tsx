@@ -57,7 +57,7 @@ export function InstructorView({ instructors, onUpdateInstructors }: InstructorV
             id: `inst-${Date.now()}`,
             name: newForm.name.trim(),
             role: newForm.role,
-            photoUrl: `https://i.pravatar.cc/160?u=${Date.now()}`,
+            photoUrl: '',
             phone: newForm.phone.trim(),
             weeklyHours: 0,
             maxHours: Number(newForm.maxHours) || 25,

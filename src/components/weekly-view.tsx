@@ -1,15 +1,169 @@
-import { useMemo } from 'react'
+import { useMemo, useState } from 'react'
 import { format, startOfWeek, addDays, isSameDay } from 'date-fns'
 import { ptBR } from 'date-fns/locale'
-import { Calendar, ChevronLeft, ChevronRight, Users } from 'lucide-react'
+import { Calendar, CalendarDays, ChevronLeft, ChevronRight, Plus, Users, X } from 'lucide-react'
 import { useStore } from '../store/useStore'
 import { getScheduleForDay, getWeekdayKey, ageGroupPalette, capacityPerClass } from '../data/schedule'
+import { cn, getAge } from '../lib/utils'
+import type { ClassSlot } from '../types'
 import { Card, CardContent } from './ui/card'
 import { Button } from './ui/button'
-import { cn } from '../lib/utils'
+import { Badge } from './ui/badge'
+import { Modal, Select } from './crm/crm-common'
 
-export function WeeklyView() {
+type WeeklyViewProps = {
+    onOpenDaily?: () => void
+}
+
+type SelectedSlot = {
+    day: Date
+    slot: ClassSlot
+}
+
+function SlotDetailModal({
+    selected,
+    onClose,
+    onOpenDaily,
+}: {
+    selected: SelectedSlot
+    onClose: () => void
+    onOpenDaily?: () => void
+}) {
+    const { students, setSelectedDate, setAssignment, getAssignmentsForDate } = useStore()
+    const [studentToAdd, setStudentToAdd] = useState('')
+
+    const { day, slot } = selected
+    const dateStr = format(day, 'yyyy-MM-dd')
+    const assignments = getAssignmentsForDate(day)
+    const assignedIds = assignments[slot.id] || []
+    const assigned = assignedIds
+        .map((id) => students.find((student) => student.id === id))
+        .filter((student) => student !== undefined)
+
+    const available = students
+        .filter((student) => student.status === 'Ativo' && !assignedIds.includes(student.id))
+        .sort((a, b) => a.name.localeCompare(b.name, 'pt-BR'))
+
+    const palette = ageGroupPalette[slot.ageGroup]
+    const isFull = assignedIds.length >= capacityPerClass
+
+    const addStudent = () => {
+        if (!studentToAdd) return
+        setAssignment(dateStr, slot.id, [...assignedIds, studentToAdd])
+        setStudentToAdd('')
+    }
+
+    const removeStudent = (studentId: string) => {
+        setAssignment(dateStr, slot.id, assignedIds.filter((id) => id !== studentId))
+    }
+
+    const openDaily = () => {
+        setSelectedDate(day)
+        onClose()
+        onOpenDaily?.()
+    }
+
+    return (
+        <Modal
+            open
+            onClose={onClose}
+            title={`Turma das ${slot.time}`}
+            description={format(day, "EEEE, dd 'de' MMMM", { locale: ptBR })}
+        >
+            <div className="space-y-4">
+                {/* Resumo da turma */}
+                <div className="flex flex-wrap items-center gap-3 rounded-xl border border-border/20 bg-surface/40 p-3">
+                    <Badge className={palette.badge}>{slot.ageGroup}</Badge>
+                    <span className="inline-flex items-center gap-1.5 text-sm text-white/85">
+                        <Users className="h-4 w-4 text-primary" />
+                        {assignedIds.length}/{capacityPerClass} alunos
+                    </span>
+                    {isFull ? <Badge variant="danger">Lotada</Badge> : null}
+                    <div className="ml-auto h-1.5 w-28 overflow-hidden rounded-full bg-border/20">
+                        <div
+                            className={cn('h-full rounded-full', isFull ? 'bg-rose-500' : 'bg-primary/70')}
+                            style={{ width: `${Math.min(100, (assignedIds.length / capacityPerClass) * 100)}%` }}
+                        />
+                    </div>
+                </div>
+
+                {/* Lista de alunos */}
+                <div className="space-y-1.5">
+                    {assigned.length > 0 ? (
+                        assigned.map((student) => {
+                            const age = student.birthDate ? getAge(student.birthDate) : null
+                            return (
+                                <div
+                                    key={student.id}
+                                    className="flex items-center gap-3 rounded-xl border border-border/20 bg-surface/40 px-3 py-2"
+                                >
+                                    <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-[10px] font-semibold text-primary">
+                                        {student.name.split(' ').slice(0, 2).map((part) => part[0]).join('')}
+                                    </div>
+                                    <div className="min-w-0 flex-1">
+                                        <p className="truncate text-sm font-medium text-white">{student.name}</p>
+                                        <p className="text-[11px] text-muted-foreground">
+                                            {age !== null ? `${age} anos` : 'Idade não cadastrada'}
+                                            {student.isTrial ? ' · Experimental' : ''}
+                                        </p>
+                                    </div>
+                                    <button
+                                        type="button"
+                                        onClick={() => removeStudent(student.id)}
+                                        className="rounded-lg p-1.5 text-muted-foreground transition-colors hover:bg-rose-500/10 hover:text-rose-400"
+                                        title="Remover da turma neste dia"
+                                        aria-label={`Remover ${student.name} da turma`}
+                                    >
+                                        <X className="h-4 w-4" />
+                                    </button>
+                                </div>
+                            )
+                        })
+                    ) : (
+                        <div className="rounded-xl border border-dashed border-border/25 p-6 text-center text-sm text-muted-foreground">
+                            Nenhum aluno nesta turma neste dia.
+                        </div>
+                    )}
+                </div>
+
+                {/* Adicionar aluno */}
+                <div className="flex gap-2">
+                    <Select value={studentToAdd} onChange={(event) => setStudentToAdd(event.target.value)}>
+                        <option value="">Adicionar aluno à turma...</option>
+                        {available.map((student) => (
+                            <option key={student.id} value={student.id}>{student.name}</option>
+                        ))}
+                    </Select>
+                    <Button onClick={addStudent} disabled={!studentToAdd || isFull} className="shrink-0 gap-1.5">
+                        <Plus className="h-4 w-4" />
+                        Adicionar
+                    </Button>
+                </div>
+                {isFull ? (
+                    <p className="text-xs text-amber-300">A turma atingiu a capacidade máxima de {capacityPerClass} alunos.</p>
+                ) : null}
+
+                <p className="text-[11px] text-muted-foreground">
+                    As mudanças valem para <strong className="text-white/80">{format(day, 'dd/MM/yyyy')}</strong>. Para
+                    check-in e remanejamento por arrastar, use a Visão Diária.
+                </p>
+
+                {onOpenDaily ? (
+                    <div className="flex justify-end">
+                        <Button variant="secondary" onClick={openDaily} className="gap-1.5">
+                            <CalendarDays className="h-4 w-4" />
+                            Abrir este dia na Visão Diária
+                        </Button>
+                    </div>
+                ) : null}
+            </div>
+        </Modal>
+    )
+}
+
+export function WeeklyView({ onOpenDaily }: WeeklyViewProps) {
     const { selectedDate, setSelectedDate, getAssignmentsForDate } = useStore()
+    const [selectedSlot, setSelectedSlot] = useState<SelectedSlot | null>(null)
 
     const weekDays = useMemo(() => {
         const start = startOfWeek(selectedDate, { locale: ptBR, weekStartsOn: 1 }) // Start Monday
@@ -31,7 +185,7 @@ export function WeeklyView() {
                         <h2 className="text-sm font-semibold text-white sm:text-base">
                             Semana de {format(weekDays[0], "dd 'de' MMMM", { locale: ptBR })}
                         </h2>
-                        <p className="text-xs text-muted-foreground">Visão geral de ocupação das turmas</p>
+                        <p className="text-xs text-muted-foreground">Clique em uma turma para ver e editar os alunos</p>
                     </div>
                 </div>
                 <div className="flex items-center gap-2">
@@ -89,8 +243,8 @@ export function WeeklyView() {
                                             <button
                                                 key={slot.id}
                                                 type="button"
-                                                onClick={() => setSelectedDate(day)}
-                                                className="group relative flex w-full flex-col items-start gap-1 rounded-xl border border-border/10 bg-surface/40 p-2 text-left transition-all hover:bg-surface/60 hover:border-border/30"
+                                                onClick={() => setSelectedSlot({ day, slot })}
+                                                className="group relative flex w-full flex-col items-start gap-1 rounded-xl border border-border/10 bg-surface/40 p-2 text-left transition-all hover:bg-surface/60 hover:border-primary/30"
                                             >
                                                 <div className="flex w-full items-center justify-between gap-1">
                                                     <span className="text-[10px] font-bold text-white leading-none">{slot.time}</span>
@@ -103,7 +257,7 @@ export function WeeklyView() {
                                                         <span className="text-[9px] font-medium">{studentCount}/{capacityPerClass}</span>
                                                     </div>
                                                     {studentCount >= capacityPerClass && (
-                                                        <span className="text-[8px] font-bold text-rose-400">LU</span>
+                                                        <span className="text-[8px] font-bold text-rose-400">LOTADA</span>
                                                     )}
                                                 </div>
 
@@ -152,6 +306,14 @@ export function WeeklyView() {
                     </div>
                 </div>
             </div>
+
+            {selectedSlot ? (
+                <SlotDetailModal
+                    selected={selectedSlot}
+                    onClose={() => setSelectedSlot(null)}
+                    onOpenDaily={onOpenDaily}
+                />
+            ) : null}
         </div>
     )
 }

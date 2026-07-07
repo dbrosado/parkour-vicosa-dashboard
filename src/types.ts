@@ -1,4 +1,13 @@
 export type AppSection =
+  | 'crm-dashboard'
+  | 'crm-leads'
+  | 'crm-pipeline'
+  | 'crm-inbox'
+  | 'crm-trials'
+  | 'crm-tasks'
+  | 'crm-templates'
+  | 'crm-whatsapp'
+  | 'crm-reports'
   | 'daily'
   | 'weekly'
   | 'students'
@@ -167,5 +176,188 @@ export interface OperationalExpense {
   amount: number
   category: ExpenseCategory
   monthReference: string
+  createdAt: string
+}
+
+export type PipelineStage =
+  | 'new'
+  | 'contacted'
+  | 'waiting'
+  | 'trial_scheduled'
+  | 'trial_confirmed'
+  | 'attended'
+  | 'no_show'
+  | 'feedback_pending'
+  | 'plan_recommended'
+  | 'negotiation'
+  | 'enrolled'
+  | 'lost'
+  | 'reactivation'
+
+export type LeadTemperature = 'cold' | 'warm' | 'hot'
+
+export type LeadSource =
+  | 'Instagram'
+  | 'Facebook'
+  | 'Google'
+  | 'Indicação'
+  | 'WhatsApp direto'
+  | 'Evento'
+  | 'Panfleto'
+  | 'Escola'
+  | 'Tráfego pago'
+  | 'Site'
+  | 'Aula experimental anterior'
+  | 'Ex-aluno'
+  | 'Outro'
+
+export type LeadStudentType =
+  | 'Criança'
+  | 'Adolescente'
+  | 'Adulto'
+  | 'Família'
+  | 'Calistenia'
+  | 'Evento'
+
+export interface LeadHistoryItem {
+  id: string
+  type: 'stage' | 'note' | 'task' | 'trial' | 'message' | 'enrollment'
+  description: string
+  createdAt: string
+}
+
+export interface CrmLead {
+  id: string
+  studentName: string
+  guardianName: string
+  whatsapp: string
+  email: string
+  instagram: string
+  age?: number
+  birthDate: string
+  city: string
+  neighborhood: string
+  source: LeadSource
+  sourceCampaign: string
+  referralBy: string
+  mainInterest: string
+  studentType: LeadStudentType
+  stage: PipelineStage
+  temperature: LeadTemperature
+  recommendedPlan: string
+  recommendedSchedule: string
+  presentedValue?: number
+  objections: string
+  lostReason: string
+  nextAction: string
+  nextActionAt: string
+  salesOwner: string
+  instructorOwner: string
+  internalNotes: string
+  communicationConsent: boolean
+  doNotContact: boolean
+  tags: string[]
+  createdAt: string
+  updatedAt: string
+  lastContactAt: string
+  history: LeadHistoryItem[]
+}
+
+export type CrmTaskType =
+  | 'call'
+  | 'whatsapp'
+  | 'email'
+  | 'confirm_trial'
+  | 'follow_up'
+  | 'close_sale'
+  | 'reactivate'
+  | 'other'
+
+export type CrmTaskStatus = 'pending' | 'completed' | 'cancelled'
+export type CrmTaskPriority = 'low' | 'medium' | 'high'
+
+export interface CrmTask {
+  id: string
+  title: string
+  leadId: string
+  owner: string
+  dueAt: string
+  type: CrmTaskType
+  status: CrmTaskStatus
+  priority: CrmTaskPriority
+  notes: string
+  createdAt: string
+}
+
+export type TrialStatus =
+  | 'scheduled'
+  | 'confirmed'
+  | 'attended'
+  | 'no_show'
+  | 'rescheduled'
+  | 'cancelled'
+
+export type TrialCommercialResult =
+  | 'pending'
+  | 'enrolled'
+  | 'thinking'
+  | 'no_response'
+  | 'not_interested'
+  | 'reschedule'
+
+export interface TrialClass {
+  id: string
+  leadId: string
+  date: string
+  time: string
+  className: string
+  instructor: string
+  status: TrialStatus
+  guardianAttendance: 'yes' | 'no' | 'partial' | 'not_applicable'
+  studentLiked: boolean | null
+  instructorFeedback: string
+  strengths: string
+  improvements: string
+  recommendedPlan: string
+  planPresented: boolean
+  enrollmentOffered: boolean
+  commercialResult: TrialCommercialResult
+  nextFollowUpAt: string
+  notes: string
+  createdAt: string
+}
+
+export type MessageDirection = 'incoming' | 'outgoing' | 'internal'
+export type MessageStatus = 'received' | 'sent' | 'delivered' | 'read' | 'failed'
+
+export interface CrmMessage {
+  id: string
+  leadId: string
+  direction: MessageDirection
+  channel: 'whatsapp' | 'email' | 'phone' | 'internal'
+  content: string
+  status: MessageStatus
+  createdAt: string
+}
+
+export interface MessageTemplate {
+  id: string
+  name: string
+  category: string
+  channel: 'whatsapp' | 'email' | 'sms'
+  content: string
+  active: boolean
+}
+
+export interface CrmOpportunity {
+  id: string
+  leadId: string
+  product: string
+  value: number
+  status: 'open' | 'won' | 'lost'
+  expectedCloseAt: string
+  owner: string
+  notes: string
+  lostReason: string
   createdAt: string
 }

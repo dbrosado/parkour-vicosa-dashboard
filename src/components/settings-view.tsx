@@ -1,139 +1,121 @@
 import {
+  AlertTriangle,
   Bell,
+  Check,
+  Database,
+  Download,
+  HardDrive,
+  KeyRound,
   Loader2,
   LogOut,
-  Plus,
   ShieldCheck,
   SlidersHorizontal,
-  Trash2,
-  UserPlus,
-  Users,
-  X,
+  Upload,
+  UserCircle2,
 } from 'lucide-react'
-import { useCallback, useEffect, useState } from 'react'
+import { useRef, useState, type ChangeEvent } from 'react'
 
 import { useAuth } from '../lib/auth'
-import { getEmailDomain, securityDebugLog } from '../lib/security-debug'
-import { supabase } from '../lib/supabase'
-import type { UserRole } from '../lib/auth'
+import { useStore } from '../store/useStore'
 import { Button } from './ui/button'
 import { Checkbox } from './ui/checkbox'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card'
 import { Input } from './ui/input'
 
-interface ManagedUser {
-  id: string
-  email: string
-  name: string
-  role: UserRole
-  created_at: string
+const PREFS_KEY = 'pkv-preferences'
+
+interface Preferences {
+  notifyFullClass: boolean
+  notifyOverdue: boolean
+  doubleConfirmDelete: boolean
+}
+
+function loadPrefs(): Preferences {
+  try {
+    const raw = localStorage.getItem(PREFS_KEY)
+    if (raw) return { notifyFullClass: true, notifyOverdue: true, doubleConfirmDelete: false, ...JSON.parse(raw) }
+  } catch {
+    // preferências corrompidas: volta ao padrão
+  }
+  return { notifyFullClass: true, notifyOverdue: true, doubleConfirmDelete: false }
 }
 
 export function SettingsView() {
-  const { isAdmin, signOut, profile } = useAuth()
-  const [users, setUsers] = useState<ManagedUser[]>([])
-  const [loadingUsers, setLoadingUsers] = useState(false)
-  const [showAddForm, setShowAddForm] = useState(false)
-  const [newEmail, setNewEmail] = useState('')
-  const [newName, setNewName] = useState('')
+  const { user, signOut, changePassword } = useAuth()
+  const { students, crmLeads, exportBackup, importBackup, resetAllData } = useStore()
+
+  const [prefs, setPrefs] = useState<Preferences>(loadPrefs)
+  const [currentPassword, setCurrentPassword] = useState('')
   const [newPassword, setNewPassword] = useState('')
-  const [newRole, setNewRole] = useState<UserRole>('instructor')
-  const [addError, setAddError] = useState<string | null>(null)
-  const [adding, setAdding] = useState(false)
+  const [confirmPassword, setConfirmPassword] = useState('')
+  const [passwordMsg, setPasswordMsg] = useState<{ ok: boolean; text: string } | null>(null)
+  const [changing, setChanging] = useState(false)
+  const [backupMsg, setBackupMsg] = useState<{ ok: boolean; text: string } | null>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
 
-  const loadUsers = useCallback(async () => {
-    if (!supabase || !isAdmin) return
-    setLoadingUsers(true)
-    const { data, error } = await supabase
-      .from('profiles')
-      .select('*')
-      .order('created_at', { ascending: true })
-
-    if (error) {
-      securityDebugLog('settings.load_users_failed', {
-        code: error.code,
-        message: error.message,
-      })
-    }
-
-    securityDebugLog('settings.load_users_result', {
-      isAdmin,
-      count: data?.length ?? 0,
+  const togglePref = (key: keyof Preferences) => {
+    setPrefs((prev) => {
+      const next = { ...prev, [key]: !prev[key] }
+      localStorage.setItem(PREFS_KEY, JSON.stringify(next))
+      return next
     })
-
-    if (data) setUsers(data as ManagedUser[])
-    setLoadingUsers(false)
-  }, [isAdmin])
-
-  useEffect(() => {
-    loadUsers()
-  }, [loadUsers])
-
-  const handleAddUser = async () => {
-    if (!supabase || !newEmail || !newPassword) return
-    setAdding(true)
-    setAddError(null)
-
-    securityDebugLog('settings.add_user_attempt', {
-      byAdminId: profile?.id ?? null,
-      emailDomain: getEmailDomain(newEmail),
-      role: newRole,
-    })
-
-    const { error } = await supabase.auth.signUp({
-      email: newEmail,
-      password: newPassword,
-      options: {
-        data: { name: newName, role: newRole },
-      },
-    })
-
-    if (error) {
-      securityDebugLog('settings.add_user_failed', {
-        byAdminId: profile?.id ?? null,
-        emailDomain: getEmailDomain(newEmail),
-        role: newRole,
-        code: error.code,
-        message: error.message,
-      })
-      setAddError(error.message)
-    } else {
-      securityDebugLog('settings.add_user_success', {
-        byAdminId: profile?.id ?? null,
-        emailDomain: getEmailDomain(newEmail),
-        role: newRole,
-      })
-      setShowAddForm(false)
-      setNewEmail('')
-      setNewName('')
-      setNewPassword('')
-      setNewRole('instructor')
-      // Wait for trigger to create profile, then reload
-      setTimeout(() => loadUsers(), 1000)
-    }
-    setAdding(false)
   }
 
-  const handleDeleteUser = async (userId: string) => {
-    if (!supabase || userId === profile?.id) return
-    // Only delete the profile - the auth user remains but can't access
-    const { error } = await supabase.from('profiles').delete().eq('id', userId)
-    if (error) {
-      securityDebugLog('settings.delete_user_failed', {
-        byAdminId: profile?.id ?? null,
-        targetUserId: userId,
-        code: error.code,
-        message: error.message,
-      })
+  const handleChangePassword = async () => {
+    setPasswordMsg(null)
+    if (newPassword !== confirmPassword) {
+      setPasswordMsg({ ok: false, text: 'A confirmação não confere com a nova senha.' })
       return
     }
+    setChanging(true)
+    const { error } = await changePassword(currentPassword, newPassword)
+    setChanging(false)
+    if (error) {
+      setPasswordMsg({ ok: false, text: error })
+      return
+    }
+    setCurrentPassword('')
+    setNewPassword('')
+    setConfirmPassword('')
+    setPasswordMsg({ ok: true, text: 'Senha alterada com sucesso.' })
+  }
 
-    securityDebugLog('settings.delete_user_success', {
-      byAdminId: profile?.id ?? null,
-      targetUserId: userId,
-    })
+  const handleExport = () => {
+    const json = exportBackup()
+    const blob = new Blob([json], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = `backup-parkour-vicosa-${new Date().toISOString().slice(0, 10)}.json`
+    link.click()
+    URL.revokeObjectURL(url)
+    setBackupMsg({ ok: true, text: 'Backup exportado. Guarde o arquivo em local seguro.' })
+  }
 
-    setUsers((prev) => prev.filter((u) => u.id !== userId))
+  const handleImportFile = async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0]
+    event.target.value = ''
+    if (!file) return
+
+    const confirmed = window.confirm(
+      'Importar este backup vai substituir todos os dados atuais do painel. Deseja continuar?',
+    )
+    if (!confirmed) return
+
+    const text = await file.text()
+    const error = importBackup(text)
+    setBackupMsg(error ? { ok: false, text: error } : { ok: true, text: 'Backup importado com sucesso.' })
+  }
+
+  const handleReset = () => {
+    const confirmed = window.confirm(
+      'Isso apaga todos os dados (alunos, leads, presenças, finanças) e restaura os dados iniciais de demonstração. Tem certeza?',
+    )
+    if (!confirmed) return
+    const doubleCheck = window.confirm('Última confirmação: esta ação não pode ser desfeita. Zerar tudo?')
+    if (!doubleCheck) return
+    resetAllData()
+    setBackupMsg({ ok: true, text: 'Dados restaurados para o estado inicial.' })
   }
 
   return (
@@ -142,224 +124,191 @@ export function SettingsView() {
         <CardHeader>
           <CardTitle className="flex items-center gap-2 font-display text-xl sm:text-2xl">
             <SlidersHorizontal className="h-5 w-5 text-primary" />
-            Configuracoes
+            Configurações
           </CardTitle>
           <CardDescription className="text-muted-foreground">
-            Ajustes rapidos para notificacoes, seguranca e operacao diaria.
+            Conta local, backup dos dados e preferências de operação. Tudo fica salvo neste computador.
           </CardDescription>
         </CardHeader>
       </Card>
 
-      {/* User Management - Admin Only */}
-      {isAdmin && supabase && (
-        <Card className="shadow-soft-sm">
-          <CardHeader className="pb-2">
-            <CardTitle className="flex items-center gap-2 text-lg font-display text-white">
-              <Users className="h-5 w-5 text-primary" />
-              Gerenciar Usuarios
-            </CardTitle>
-            <CardDescription>
-              Adicione professores e gerencie acessos a plataforma.
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            {/* Users List */}
-            {loadingUsers ? (
-              <div className="flex items-center justify-center py-4">
-                <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
-              </div>
-            ) : (
-              <div className="space-y-2 stagger-children">
-                {users.map((u) => (
-                  <div
-                    key={u.id}
-                    className="flex items-center justify-between gap-3 rounded-xl border border-border/20 bg-surface/40 px-4 py-3"
-                  >
-                    <div className="min-w-0 flex-1">
-                      <p className="truncate text-sm font-medium text-white">
-                        {u.name || u.email}
-                      </p>
-                      <p className="text-xs text-muted-foreground">{u.email}</p>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <span
-                        className={
-                          u.role === 'admin'
-                            ? 'chip-success text-[10px]'
-                            : 'rounded-full border border-border/20 bg-surface/40 px-2 py-0.5 text-[10px] text-muted-foreground'
-                        }
-                      >
-                        {u.role === 'admin' ? 'Admin' : 'Professor'}
-                      </span>
-                      {u.id !== profile?.id && (
-                        <button
-                          type="button"
-                          onClick={() => handleDeleteUser(u.id)}
-                          className="rounded-lg p-1.5 text-muted-foreground hover:bg-rose-500/10 hover:text-rose-400 transition-colors"
-                          title="Remover acesso"
-                        >
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-
-            {/* Add User Form */}
-            {showAddForm ? (
-              <div className="rounded-xl border border-primary/20 bg-surface/40 p-4 space-y-3 animate-fade-in">
-                <div className="flex items-center justify-between">
-                  <p className="text-xs font-display font-semibold text-white/80">
-                    Novo Usuario
-                  </p>
-                  <button type="button" onClick={() => setShowAddForm(false)}>
-                    <X className="h-4 w-4 text-muted-foreground hover:text-white" />
-                  </button>
-                </div>
-                <div className="grid gap-3 sm:grid-cols-2">
-                  <div>
-                    <label className="text-[10px] text-muted-foreground">Nome</label>
-                    <Input
-                      placeholder="Nome completo"
-                      value={newName}
-                      onChange={(e) => setNewName(e.target.value)}
-                      className="mt-0.5"
-                    />
-                  </div>
-                  <div>
-                    <label className="text-[10px] text-muted-foreground">E-mail</label>
-                    <Input
-                      type="email"
-                      placeholder="email@exemplo.com"
-                      value={newEmail}
-                      onChange={(e) => setNewEmail(e.target.value)}
-                      className="mt-0.5"
-                      required
-                    />
-                  </div>
-                  <div>
-                    <label className="text-[10px] text-muted-foreground">Senha</label>
-                    <Input
-                      type="password"
-                      placeholder="Minimo 6 caracteres"
-                      value={newPassword}
-                      onChange={(e) => setNewPassword(e.target.value)}
-                      className="mt-0.5"
-                      required
-                    />
-                  </div>
-                  <div>
-                    <label className="text-[10px] text-muted-foreground">Funcao</label>
-                    <select
-                      value={newRole}
-                      onChange={(e) => setNewRole(e.target.value as UserRole)}
-                      className="mt-0.5 h-9 w-full rounded-lg border border-border/20 bg-surface/60 px-3 text-sm text-white focus:outline-none focus:ring-1 focus:ring-primary/50"
-                    >
-                      <option value="instructor">Professor</option>
-                      <option value="admin">Administrador</option>
-                    </select>
-                  </div>
-                </div>
-                {addError && (
-                  <p className="text-xs text-rose-400">{addError}</p>
-                )}
-                <Button
-                  size="sm"
-                  onClick={handleAddUser}
-                  className="w-full"
-                  disabled={adding || !newEmail || !newPassword}
-                >
-                  {adding ? (
-                    <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" />
-                  ) : (
-                    <UserPlus className="mr-2 h-3.5 w-3.5" />
-                  )}
-                  Criar Usuario
-                </Button>
-              </div>
-            ) : (
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setShowAddForm(true)}
-                className="w-full gap-1.5"
-              >
-                <Plus className="h-3.5 w-3.5" />
-                Adicionar Professor
-              </Button>
-            )}
-          </CardContent>
-        </Card>
-      )}
-
-      {/* Notification Settings */}
+      {/* Conta local */}
       <Card className="shadow-soft-sm">
-        <CardContent className="space-y-3 p-4 sm:p-5 stagger-children">
+        <CardHeader className="pb-2">
+          <CardTitle className="flex items-center gap-2 text-lg font-display text-white">
+            <UserCircle2 className="h-5 w-5 text-primary" />
+            Conta Local
+          </CardTitle>
+          <CardDescription>Acesso do painel neste dispositivo.</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="flex items-center justify-between gap-3 rounded-xl border border-border/20 bg-surface/40 px-4 py-3">
+            <div>
+              <p className="text-sm font-medium text-white">Conectado como {user?.name}</p>
+              <p className="text-xs text-muted-foreground">Usuário: {user?.username}</p>
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={signOut}
+              className="gap-1.5 text-rose-400 border-rose-500/20 hover:bg-rose-500/10"
+            >
+              <LogOut className="h-3.5 w-3.5" />
+              Sair
+            </Button>
+          </div>
+
+          <div className="rounded-xl border border-border/20 bg-surface/40 p-4 space-y-3">
+            <p className="inline-flex items-center gap-2 text-xs font-display font-semibold text-white/80">
+              <KeyRound className="h-4 w-4 text-primary" />
+              Alterar senha
+            </p>
+            <div className="grid gap-3 sm:grid-cols-3">
+              <div>
+                <label className="text-[10px] text-muted-foreground">Senha atual</label>
+                <Input
+                  type="password"
+                  value={currentPassword}
+                  onChange={(e) => setCurrentPassword(e.target.value)}
+                  className="mt-0.5"
+                  autoComplete="current-password"
+                />
+              </div>
+              <div>
+                <label className="text-[10px] text-muted-foreground">Nova senha</label>
+                <Input
+                  type="password"
+                  value={newPassword}
+                  onChange={(e) => setNewPassword(e.target.value)}
+                  className="mt-0.5"
+                  placeholder="Mínimo 6 caracteres"
+                  autoComplete="new-password"
+                />
+              </div>
+              <div>
+                <label className="text-[10px] text-muted-foreground">Confirmar nova senha</label>
+                <Input
+                  type="password"
+                  value={confirmPassword}
+                  onChange={(e) => setConfirmPassword(e.target.value)}
+                  className="mt-0.5"
+                  autoComplete="new-password"
+                />
+              </div>
+            </div>
+            {passwordMsg && (
+              <p className={`inline-flex items-center gap-1.5 text-xs ${passwordMsg.ok ? 'text-emerald-400' : 'text-rose-400'}`}>
+                {passwordMsg.ok ? <Check className="h-3.5 w-3.5" /> : <AlertTriangle className="h-3.5 w-3.5" />}
+                {passwordMsg.text}
+              </p>
+            )}
+            <Button
+              size="sm"
+              onClick={handleChangePassword}
+              disabled={changing || !currentPassword || !newPassword || !confirmPassword}
+              className="gap-1.5"
+            >
+              {changing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <KeyRound className="h-3.5 w-3.5" />}
+              Salvar nova senha
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Backup */}
+      <Card className="shadow-soft-sm">
+        <CardHeader className="pb-2">
+          <CardTitle className="flex items-center gap-2 text-lg font-display text-white">
+            <Database className="h-5 w-5 text-primary" />
+            Backup dos Dados
+          </CardTitle>
+          <CardDescription>
+            Os dados vivem no navegador deste computador. Exporte um arquivo JSON regularmente para não perder nada.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <div className="grid gap-3 rounded-xl border border-border/20 bg-surface/40 p-4 text-sm text-muted-foreground sm:grid-cols-2">
+            <p className="inline-flex items-center gap-2">
+              <HardDrive className="h-4 w-4 text-primary" />
+              {students.length} alunos · {crmLeads.length} leads no painel
+            </p>
+            <p className="inline-flex items-center gap-2">
+              <ShieldCheck className="h-4 w-4 text-emerald-400" />
+              Armazenamento 100% local (localStorage)
+            </p>
+          </div>
+
+          <div className="flex flex-col gap-2 sm:flex-row">
+            <Button size="sm" onClick={handleExport} className="flex-1 gap-1.5">
+              <Download className="h-3.5 w-3.5" />
+              Exportar backup (.json)
+            </Button>
+            <Button size="sm" variant="outline" onClick={() => fileInputRef.current?.click()} className="flex-1 gap-1.5">
+              <Upload className="h-3.5 w-3.5" />
+              Importar backup
+            </Button>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="application/json,.json"
+              onChange={handleImportFile}
+              className="hidden"
+            />
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={handleReset}
+              className="flex-1 gap-1.5 text-rose-400 border-rose-500/20 hover:bg-rose-500/10"
+            >
+              <AlertTriangle className="h-3.5 w-3.5" />
+              Zerar dados
+            </Button>
+          </div>
+
+          {backupMsg && (
+            <p className={`inline-flex items-center gap-1.5 text-xs ${backupMsg.ok ? 'text-emerald-400' : 'text-rose-400'}`}>
+              {backupMsg.ok ? <Check className="h-3.5 w-3.5" /> : <AlertTriangle className="h-3.5 w-3.5" />}
+              {backupMsg.text}
+            </p>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Preferências */}
+      <Card className="shadow-soft-sm">
+        <CardHeader className="pb-2">
+          <CardTitle className="flex items-center gap-2 text-lg font-display text-white">
+            <Bell className="h-5 w-5 text-primary" />
+            Preferências
+          </CardTitle>
+          <CardDescription>Ajustes de alertas e proteção da operação diária.</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-3 stagger-children">
           <label className="flex items-center justify-between gap-3 rounded-xl border border-border/20 bg-surface/40 px-4 py-3 transition-colors hover:border-border/30 hover:bg-surface/60 cursor-pointer">
             <div>
               <p className="text-sm font-medium text-white">Notificar turma lotada</p>
               <p className="text-xs text-muted-foreground">Alerta quando uma turma atingir 12 alunos.</p>
             </div>
-            <Checkbox defaultChecked />
+            <Checkbox checked={prefs.notifyFullClass} onCheckedChange={() => togglePref('notifyFullClass')} />
           </label>
 
           <label className="flex items-center justify-between gap-3 rounded-xl border border-border/20 bg-surface/40 px-4 py-3 transition-colors hover:border-border/30 hover:bg-surface/60 cursor-pointer">
             <div>
-              <p className="text-sm font-medium text-white">Lembrete de inadimplencia</p>
-              <p className="text-xs text-muted-foreground">Enviar aviso automatico para responsaveis.</p>
+              <p className="text-sm font-medium text-white">Lembrete de inadimplência</p>
+              <p className="text-xs text-muted-foreground">Destaca responsáveis com pagamento pendente.</p>
             </div>
-            <Checkbox defaultChecked />
+            <Checkbox checked={prefs.notifyOverdue} onCheckedChange={() => togglePref('notifyOverdue')} />
           </label>
 
           <label className="flex items-center justify-between gap-3 rounded-xl border border-border/20 bg-surface/40 px-4 py-3 transition-colors hover:border-border/30 hover:bg-surface/60 cursor-pointer">
             <div>
-              <p className="text-sm font-medium text-white">Aprovacao dupla para exclusoes</p>
-              <p className="text-xs text-muted-foreground">Protecao extra para mudancas criticas de dados.</p>
+              <p className="text-sm font-medium text-white">Aprovação dupla para exclusões</p>
+              <p className="text-xs text-muted-foreground">Proteção extra para mudanças críticas de dados.</p>
             </div>
-            <Checkbox />
+            <Checkbox checked={prefs.doubleConfirmDelete} onCheckedChange={() => togglePref('doubleConfirmDelete')} />
           </label>
-
-          <div className="grid gap-3 rounded-xl border border-border/20 bg-surface/40 p-4 text-sm text-muted-foreground sm:grid-cols-2">
-            <p className="inline-flex items-center gap-2">
-              <Bell className="h-4 w-4 text-primary" />
-              Canal de avisos: WhatsApp + E-mail
-            </p>
-            <p className="inline-flex items-center gap-2">
-              <ShieldCheck className="h-4 w-4 text-emerald-400" />
-              Backup diario as 23:30
-            </p>
-          </div>
         </CardContent>
       </Card>
-
-      {/* Logout */}
-      {supabase && (
-        <Card className="shadow-soft-sm">
-          <CardContent className="p-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm font-medium text-white">
-                  Conectado como {profile?.name || profile?.email}
-                </p>
-                <p className="text-xs text-muted-foreground">
-                  {profile?.role === 'admin' ? 'Administrador' : 'Professor'}
-                </p>
-              </div>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={signOut}
-                className="gap-1.5 text-rose-400 border-rose-500/20 hover:bg-rose-500/10"
-              >
-                <LogOut className="h-3.5 w-3.5" />
-                Sair
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
-      )}
     </div>
   )
 }

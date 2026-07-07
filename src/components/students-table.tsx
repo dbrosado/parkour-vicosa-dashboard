@@ -152,7 +152,7 @@ export function StudentsTable({ students, onAddStudent, onUpdateStudent }: Stude
         paymentStatus: 'Pendente',
         mainClass: form.mainClass.trim(),
         isTrial: form.isTrial,
-        photoUrl: `https://i.pravatar.cc/160?u=${now}`,
+        photoUrl: '',
         enrolledAt: new Date().toISOString().slice(0, 10),
         plan: form.plan,
         monthlyFee: Number(form.monthlyFee) || 0,
@@ -212,7 +212,7 @@ export function StudentsTable({ students, onAddStudent, onUpdateStudent }: Stude
                 Lista de Alunos
               </CardTitle>
               <CardDescription className="mt-1 text-muted-foreground">
-                Consulte cadastro, pagamentos e turma principal com pesquisa rapida.
+                Consulte cadastro, pagamentos e turma principal com pesquisa rápida.
               </CardDescription>
             </div>
             <Button onClick={() => setShowForm(true)} className="tactile btn-glow">
@@ -249,96 +249,116 @@ export function StudentsTable({ students, onAddStudent, onUpdateStudent }: Stude
           <CardContent>
             <form onSubmit={handleSubmit} className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
               {/* Name */}
-              <Input
-                placeholder="Nome completo *"
-                value={form.name}
-                onChange={(e) => updateField('name', e.target.value)}
-                required
-              />
+              <div>
+                <label className="mb-1 block text-xs text-muted-foreground">Nome completo *</label>
+                <Input
+                  placeholder="Ex: João da Silva"
+                  value={form.name}
+                  onChange={(e) => updateField('name', e.target.value)}
+                  required
+                />
+              </div>
 
               {/* Birth Date */}
-              <div className="relative">
+              <div>
+                <label className="mb-1 block text-xs text-muted-foreground">Data de nascimento</label>
                 <Input
                   type="date"
                   value={form.birthDate}
                   onChange={(e) => updateField('birthDate', e.target.value)}
                   className="text-white/80"
-                  placeholder="Data de nascimento"
                 />
-                {!form.birthDate && (
-                  <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">
-                    Data de nascimento
-                  </span>
-                )}
               </div>
 
               {/* Parent Name */}
-              <Input
-                placeholder="Nome do responsavel"
-                value={form.parentName}
-                onChange={(e) => updateField('parentName', e.target.value)}
-              />
+              <div>
+                <label className="mb-1 block text-xs text-muted-foreground">Nome do responsável</label>
+                <Input
+                  placeholder="Ex: Maria da Silva"
+                  value={form.parentName}
+                  onChange={(e) => updateField('parentName', e.target.value)}
+                />
+              </div>
 
               {/* Parent Contact */}
-              <Input
-                type="tel"
-                placeholder="Contato do responsavel *"
-                value={form.parentContact}
-                onChange={(e) => updateField('parentContact', e.target.value)}
-                required
-              />
+              <div>
+                <label className="mb-1 block text-xs text-muted-foreground">Contato do responsável *</label>
+                <Input
+                  type="tel"
+                  placeholder="(31) 99999-9999"
+                  value={form.parentContact}
+                  onChange={(e) => updateField('parentContact', e.target.value)}
+                  required
+                />
+              </div>
 
               {/* Emergency Phone */}
-              <Input
-                type="tel"
-                placeholder="Telefone de emergencia"
-                value={form.emergencyPhone}
-                onChange={(e) => updateField('emergencyPhone', e.target.value)}
-              />
+              <div>
+                <label className="mb-1 block text-xs text-muted-foreground">Telefone de emergência</label>
+                <Input
+                  type="tel"
+                  placeholder="(31) 99999-9999"
+                  value={form.emergencyPhone}
+                  onChange={(e) => updateField('emergencyPhone', e.target.value)}
+                />
+              </div>
 
               {/* Main Class */}
-              <Input
-                placeholder="Turma principal (ex: 09:00)"
-                value={form.mainClass}
-                onChange={(e) => updateField('mainClass', e.target.value)}
-              />
+              <div>
+                <label className="mb-1 block text-xs text-muted-foreground">Turma principal</label>
+                <Input
+                  placeholder="Ex: 09:00"
+                  value={form.mainClass}
+                  onChange={(e) => updateField('mainClass', e.target.value)}
+                />
+              </div>
 
               {/* Plan Select */}
-              <select
-                value={form.plan}
-                onChange={(e) => updateField('plan', e.target.value as PlanType)}
-                className="flex h-10 w-full rounded-xl border border-border/20 bg-surface/40 px-3 py-2 text-sm text-white/80 ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 focus-visible:ring-offset-2"
-              >
-                <option value="Mensal">Mensal</option>
-                <option value="Trimestral">Trimestral</option>
-                <option value="Semestral">Semestral</option>
-              </select>
+              <div>
+                <label className="mb-1 block text-xs text-muted-foreground">Plano</label>
+                <select
+                  value={form.plan}
+                  onChange={(e) => updateField('plan', e.target.value as PlanType)}
+                  className="flex h-10 w-full rounded-xl border border-border/20 bg-surface/40 px-3 py-2 text-sm text-white/80 ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 focus-visible:ring-offset-2"
+                >
+                  <option value="Mensal">Mensal</option>
+                  <option value="Trimestral">Trimestral</option>
+                  <option value="Semestral">Semestral</option>
+                </select>
+              </div>
 
               {/* Monthly Fee */}
-              <Input
-                type="number"
-                placeholder="Mensalidade (R$)"
-                value={form.monthlyFee}
-                onChange={(e) => updateField('monthlyFee', e.target.value)}
-                min="0"
-                step="0.01"
-              />
+              <div>
+                <label className="mb-1 block text-xs text-muted-foreground">Mensalidade (R$)</label>
+                <Input
+                  type="number"
+                  placeholder="Ex: 150.00"
+                  value={form.monthlyFee}
+                  onChange={(e) => updateField('monthlyFee', e.target.value)}
+                  min="0"
+                  step="0.01"
+                />
+              </div>
 
               {/* Status Select */}
-              <select
-                value={form.status}
-                onChange={(e) => updateField('status', e.target.value as StudentStatus)}
-                className="flex h-10 w-full rounded-xl border border-border/20 bg-surface/40 px-3 py-2 text-sm text-white/80 ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 focus-visible:ring-offset-2"
-              >
-                <option value="Ativo">Ativo</option>
-                <option value="Inativo">Inativo</option>
-                <option value="Trancado">Trancado</option>
-              </select>
+              <div>
+                <label className="mb-1 block text-xs text-muted-foreground">Status</label>
+                <select
+                  value={form.status}
+                  onChange={(e) => updateField('status', e.target.value as StudentStatus)}
+                  className="flex h-10 w-full rounded-xl border border-border/20 bg-surface/40 px-3 py-2 text-sm text-white/80 ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 focus-visible:ring-offset-2"
+                >
+                  <option value="Ativo">Ativo</option>
+                  <option value="Inativo">Inativo</option>
+                  <option value="Trancado">Trancado</option>
+                </select>
+              </div>
 
               {/* Allergies */}
               <div className="sm:col-span-2 lg:col-span-3">
+                <label className="mb-1 block text-xs text-muted-foreground">Alergias ou observações médicas</label>
                 <textarea
-                  placeholder="Alergias ou observacoes medicas"
+                  placeholder="Deixe em branco se não houver"
                   value={form.allergies}
                   onChange={(e) => updateField('allergies', e.target.value)}
                   rows={2}
@@ -449,7 +469,7 @@ export function StudentsTable({ students, onAddStudent, onUpdateStudent }: Stude
                           <CalendarCheck className="h-3 w-3" />
                           {attendanceRate}%
                         </p>
-                        <p className="text-[10px] text-emerald-300/60">Frequencia</p>
+                        <p className="text-[10px] text-emerald-300/60">Frequência</p>
                       </div>
                       <div className="stat-card border-rose-500/20 text-center">
                         <p className="flex items-center justify-center gap-1 text-xs text-rose-400">
@@ -474,17 +494,17 @@ export function StudentsTable({ students, onAddStudent, onUpdateStudent }: Stude
                       </p>
                       {student.parentName && (
                         <p>
-                          <span className="text-white/80">Responsavel:</span> {student.parentName}
+                          <span className="text-white/80">Responsável:</span> {student.parentName}
                         </p>
                       )}
                       {student.emergencyPhone && (
                         <p>
-                          <span className="text-white/80">Emergencia:</span> {student.emergencyPhone}
+                          <span className="text-white/80">Emergência:</span> {student.emergencyPhone}
                         </p>
                       )}
                       {student.enrolledAt && (
                         <p>
-                          <span className="text-white/80">Matricula:</span>{' '}
+                          <span className="text-white/80">Matrícula:</span>{' '}
                           {new Date(student.enrolledAt).toLocaleDateString('pt-BR')}
                         </p>
                       )}
@@ -535,7 +555,7 @@ export function StudentsTable({ students, onAddStudent, onUpdateStudent }: Stude
                 <TableHead className="text-muted-foreground">Idade</TableHead>
                 <TableHead className="text-muted-foreground">Contato</TableHead>
                 <TableHead className="text-muted-foreground">Turma</TableHead>
-                <TableHead className="text-muted-foreground">Frequencia</TableHead>
+                <TableHead className="text-muted-foreground">Frequência</TableHead>
                 <TableHead className="text-muted-foreground">Faltas</TableHead>
                 <TableHead className="text-muted-foreground">Pagamento</TableHead>
                 <TableHead className="text-muted-foreground">Status</TableHead>

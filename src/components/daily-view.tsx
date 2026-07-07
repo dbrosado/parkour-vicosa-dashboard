@@ -386,7 +386,7 @@ export function DailyView() {
       paymentStatus: 'Em dia',
       mainClass: `${slots.find((s) => s.id === quickForm.slotId)?.time} (${slots.find((s) => s.id === quickForm.slotId)?.ageGroup})`,
       isTrial: quickForm.isTrial,
-      photoUrl: `https://i.pravatar.cc/160?u=${Date.now()}`,
+      photoUrl: '',
       enrolledAt: new Date().toISOString().split('T')[0],
       plan: 'Mensal',
       monthlyFee: 150,

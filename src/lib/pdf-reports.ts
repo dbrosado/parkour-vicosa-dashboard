@@ -4,6 +4,7 @@ import type {
   SkillCategory,
   ConditioningTest,
 } from '../types'
+import type { jsPDF as JsPdfDocument } from 'jspdf'
 import {
   getAge,
   calculateBMI,
@@ -63,6 +64,16 @@ const TABLE_STYLES = {
   headStyles: { fillColor: [41, 128, 185] as [number, number, number] },
 }
 
+type AutoTableDocument = JsPdfDocument & {
+  lastAutoTable?: {
+    finalY: number
+  }
+}
+
+function autoTableFinalY(doc: AutoTableDocument): number {
+  return doc.lastAutoTable?.finalY ?? 20
+}
+
 // ---------------------------------------------------------------------------
 // 1. Individual Student Report
 // ---------------------------------------------------------------------------
@@ -71,7 +82,7 @@ export async function generateStudentReport(student: Student): Promise<void> {
   const jsPDF = (await import('jspdf')).default
   const autoTable = (await import('jspdf-autotable')).default
 
-  const doc = new jsPDF()
+  const doc: AutoTableDocument = new jsPDF()
   let y = 20
 
   // ---- PAGE 1 ----
@@ -105,7 +116,7 @@ export async function generateStudentReport(student: Student): Promise<void> {
       ['Status', statusMap[student.paymentStatus] ?? student.paymentStatus],
     ],
   })
-  y = (doc as any).lastAutoTable.finalY + 10
+  y = autoTableFinalY(doc) + 10
 
   // Physical Assessment (latest)
   const sortedAssessments = [...student.physicalAssessments].sort(
@@ -135,7 +146,7 @@ export async function generateStudentReport(student: Student): Promise<void> {
         ['Razao Cintura/Altura', `${whr.ratio}`],
       ],
     })
-    y = (doc as any).lastAutoTable.finalY + 10
+    y = autoTableFinalY(doc) + 10
 
     // Physical assessment history table
     if (sortedAssessments.length > 1) {
@@ -160,7 +171,7 @@ export async function generateStudentReport(student: Student): Promise<void> {
           `${calculateBMI(a.weight, a.height)}`,
         ]),
       })
-      y = (doc as any).lastAutoTable.finalY + 10
+      y = autoTableFinalY(doc) + 10
     }
   }
 
@@ -200,7 +211,7 @@ export async function generateStudentReport(student: Student): Promise<void> {
         return [ex.label, `${ex.value}${ex.unit}`, levelLabel(result.level)]
       }),
     })
-    y = (doc as any).lastAutoTable.finalY + 10
+    y = autoTableFinalY(doc) + 10
 
     // Conditioning history table
     if (sortedTests.length > 1) {
@@ -226,7 +237,7 @@ export async function generateStudentReport(student: Student): Promise<void> {
           `${t.horizontalJump}`,
         ]),
       })
-      y = (doc as any).lastAutoTable.finalY + 10
+      y = autoTableFinalY(doc) + 10
     }
   }
 
@@ -265,7 +276,7 @@ export async function generateStudentReport(student: Student): Promise<void> {
       head: [['Categoria', 'Dominadas', 'Total', 'Percentual']],
       body: skillRows,
     })
-    y = (doc as any).lastAutoTable.finalY + 10
+    y = autoTableFinalY(doc) + 10
   }
 
   // ---- PAGE 3 (if needed) ----
@@ -297,7 +308,7 @@ export async function generateStudentReport(student: Student): Promise<void> {
         ['Taxa', `${rate}%`],
       ],
     })
-    y = (doc as any).lastAutoTable.finalY + 10
+    y = autoTableFinalY(doc) + 10
   }
 
   // Payment history (last 12)
@@ -350,7 +361,7 @@ export async function generateAcademyReport(
   const jsPDF = (await import('jspdf')).default
   const autoTable = (await import('jspdf-autotable')).default
 
-  const doc = new jsPDF()
+  const doc: AutoTableDocument = new jsPDF()
   let y = 20
 
   const monthRef = currentMonthRef()
@@ -384,7 +395,7 @@ export async function generateAcademyReport(
       ['Experimentais', `${trial}`],
     ],
   })
-  y = (doc as any).lastAutoTable.finalY + 10
+  y = autoTableFinalY(doc) + 10
 
   // Financial summary for current month
   const monthPayments = students.flatMap((s) =>
@@ -412,7 +423,7 @@ export async function generateAcademyReport(
       ['Lucro/Prejuizo', `R$ ${profit.toFixed(2)}`],
     ],
   })
-  y = (doc as any).lastAutoTable.finalY + 10
+  y = autoTableFinalY(doc) + 10
 
   // Expense breakdown by category
   if (monthExpenses.length > 0) {
@@ -450,7 +461,7 @@ export async function generateAcademyReport(
         `R$ ${val.toFixed(2)}`,
       ]),
     })
-    y = (doc as any).lastAutoTable.finalY + 10
+    y = autoTableFinalY(doc) + 10
   }
 
   // ---- PAGE 2 ----
@@ -489,7 +500,7 @@ export async function generateAcademyReport(
     head: [['Mes', 'Receita', 'Pendente', 'Total Pgtos']],
     body: monthlyRows,
   })
-  y = (doc as any).lastAutoTable.finalY + 10
+  y = autoTableFinalY(doc) + 10
 
   // Top attendance ranking
   if (y > 260) {
@@ -525,7 +536,7 @@ export async function generateAcademyReport(
       `${r.rate}%`,
     ]),
   })
-  y = (doc as any).lastAutoTable.finalY + 10
+  y = autoTableFinalY(doc) + 10
 
   // ---- PAGE 3 (if needed) ----
 

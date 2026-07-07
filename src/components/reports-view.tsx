@@ -38,6 +38,7 @@ import type {
     ExpenseCategory,
     OperationalExpense,
     SkillCategory,
+    Student,
 } from '../types'
 import { useStore } from '../store/useStore'
 import { Badge } from './ui/badge'
@@ -372,7 +373,7 @@ function FinancialTab({
     updateExpense,
     deleteExpense,
 }: {
-    students: ReturnType<typeof useStore>['students']
+    students: Student[]
     operationalExpenses: OperationalExpense[]
     addExpense: (expense: OperationalExpense) => void
     updateExpense: (expense: OperationalExpense) => void
@@ -1085,7 +1086,7 @@ function EvolutionTab() {
 // ─── Tab 4: Imprimir ─────────────────────────────────────────────────────────
 
 function PrintTab() {
-    const { students } = useStore()
+    const { students, operationalExpenses } = useStore()
 
     const [selectedStudentId, setSelectedStudentId] = useState('')
     const [loadingStudent, setLoadingStudent] = useState(false)
@@ -1115,7 +1116,7 @@ function PrintTab() {
         setLoadingAcademy(true)
         try {
             const { generateAcademyReport } = await import('../lib/pdf-reports')
-            await generateAcademyReport(students)
+            await generateAcademyReport(students, operationalExpenses)
         } catch (err) {
             console.error('Erro ao gerar relatorio da academia:', err)
         } finally {

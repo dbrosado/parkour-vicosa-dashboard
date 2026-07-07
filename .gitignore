@@ -20,7 +20,6 @@ dist-ssr
 .claude/
 
 # Supabase CLI temp
-supabase/.temp/
 
 # Editor directories and files
 .vscode/*
@@ -33,3 +32,6 @@ supabase/.temp/
 *.sln
 *.sw?
 .vercel
+
+# Sessão local do WhatsApp (nunca versionar)
+server/.wa-session/
