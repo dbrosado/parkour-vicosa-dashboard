@@ -12,7 +12,7 @@ function localWhatsAppServer(): Plugin {
   let child: ChildProcess | null = null
 
   const start = () => {
-    if (child) return
+    if (child || process.env.CRM_EXTERNAL_SERVER === '1') return
     child = spawn(process.execPath, [whatsappScript], { stdio: 'inherit' })
     child.on('exit', () => {
       child = null
@@ -45,13 +45,15 @@ function localWhatsAppServer(): Plugin {
 export default defineConfig({
   plugins: [react(), localWhatsAppServer()],
   server: {
+    host: '127.0.0.1',
+    strictPort: true,
     proxy: {
-      '/api/whatsapp': 'http://127.0.0.1:3901',
+      '/api': 'http://127.0.0.1:3901',
     },
   },
   preview: {
     proxy: {
-      '/api/whatsapp': 'http://127.0.0.1:3901',
+      '/api': 'http://127.0.0.1:3901',
     },
   },
 })

@@ -1,101 +1,86 @@
-import {
-  createContext,
-  useCallback,
-  useContext,
-  useMemo,
-  useState,
-  type ReactNode,
-} from 'react'
+import { flushData } from './data-sync'
+import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
+import { apiRequest, setCsrfToken } from './api'
 
 export interface LocalUser {
+  id: string
   username: string
   name: string
+  role: 'admin' | 'trainer'
+  instructorId?: string
+  active?: boolean
 }
-
+interface SetupInput { username: string; name: string; password: string; setupToken: string }
+interface AuthResult { user: LocalUser | null; needsSetup?: boolean; setupRequired?: boolean; csrfToken?: string; bootstrapToken?: string }
 interface AuthContextValue {
   user: LocalUser | null
+  loading: boolean
+  error: string | null
+  needsSetup: boolean
+  bootstrapToken: string
+  refresh: () => Promise<void>
+  setup: (input: SetupInput) => Promise<{ error: string | null }>
   signIn: (username: string, password: string, remember: boolean) => Promise<{ error: string | null }>
-  signOut: () => void
+  signOut: () => Promise<void>
   changePassword: (currentPassword: string, newPassword: string) => Promise<{ error: string | null }>
 }
-
-const DEFAULT_USERNAME = 'danilo'
-// SHA-256 de "parkour2026" — senha padrão, alterável em Configurações
-const DEFAULT_PASSWORD_HASH = 'b8effb81d5a54efd99002c7555a909dd8ff38c769f6e544be4ba7110c6ac1e5b'
-
-const SESSION_KEY = 'pkv-auth-session'
-const PASSWORD_KEY = 'pkv-auth-password-hash'
-
-async function sha256Hex(value: string): Promise<string> {
-  const bytes = new TextEncoder().encode(value)
-  const digest = await crypto.subtle.digest('SHA-256', bytes)
-  return Array.from(new Uint8Array(digest))
-    .map((b) => b.toString(16).padStart(2, '0'))
-    .join('')
-}
-
-function storedPasswordHash(): string {
-  return localStorage.getItem(PASSWORD_KEY) || DEFAULT_PASSWORD_HASH
-}
-
-function readSession(): LocalUser | null {
-  const raw = sessionStorage.getItem(SESSION_KEY) || localStorage.getItem(SESSION_KEY)
-  if (!raw) return null
-  try {
-    return JSON.parse(raw) as LocalUser
-  } catch {
-    return null
-  }
-}
-
 const AuthContext = createContext<AuthContextValue | null>(null)
+function message(error: unknown) { return error instanceof Error ? error.message : 'Não foi possível concluir. Tente novamente.' }
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  // localStorage é síncrono, então a sessão já entra resolvida no primeiro render
-  const [user, setUser] = useState<LocalUser | null>(readSession)
-
+  const [user, setUser] = useState<LocalUser | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+  const [needsSetup, setNeedsSetup] = useState(false)
+  const [bootstrapToken, setBootstrapToken] = useState('')
+  const acceptSession = useCallback((result: AuthResult) => {
+    setCsrfToken(result.csrfToken ?? null)
+    setUser(result.user)
+    setNeedsSetup(Boolean(result.needsSetup ?? result.setupRequired))
+    setBootstrapToken(result.bootstrapToken ?? '')
+    setError(null)
+  }, [])
+  const refresh = useCallback(async () => {
+    setLoading(true)
+    setError(null)
+    try { acceptSession(await apiRequest<AuthResult>('/api/auth/status')) }
+    catch (err) { setUser(null); setError(message(err)) }
+    finally { setLoading(false) }
+  }, [acceptSession])
+  useEffect(() => {
+    localStorage.removeItem('pkv-auth-session')
+    localStorage.removeItem('pkv-auth-password-hash')
+    sessionStorage.removeItem('pkv-auth-session')
+    void refresh()
+    const onExpired = () => { setUser(null); setCsrfToken(null); setError('Sua sessão expirou. Entre novamente para continuar.') }
+    window.addEventListener('pkv-session-expired', onExpired)
+    return () => window.removeEventListener('pkv-session-expired', onExpired)
+  }, [refresh])
+  const setup = useCallback(async (input: SetupInput) => {
+    try { acceptSession(await apiRequest<AuthResult>('/api/auth/setup', { method: 'POST', body: JSON.stringify(input) })); return { error: null } }
+    catch (err) { return { error: message(err) } }
+  }, [acceptSession])
   const signIn = useCallback(async (username: string, password: string, remember: boolean) => {
-    const normalized = username.trim().toLowerCase()
-    const passwordHash = await sha256Hex(password)
-
-    if (normalized !== DEFAULT_USERNAME || passwordHash !== storedPasswordHash()) {
-      return { error: 'Usuário ou senha incorretos.' }
-    }
-
-    const nextUser: LocalUser = { username: DEFAULT_USERNAME, name: 'Danilo' }
-    const storage = remember ? localStorage : sessionStorage
-    storage.setItem(SESSION_KEY, JSON.stringify(nextUser))
-    setUser(nextUser)
-    return { error: null }
+    try { acceptSession(await apiRequest<AuthResult>('/api/auth/login', { method: 'POST', body: JSON.stringify({ username: username.trim(), password, remember }) })); return { error: null } }
+    catch (err) { return { error: message(err) } }
+  }, [acceptSession])
+  const signOut = useCallback(async () => {
+    try { await flushData(); await apiRequest('/api/auth/logout', { method: 'POST' }); setUser(null); setCsrfToken(null); setError(null) }
+    catch (err) { window.alert(`Não foi possível sair com segurança. Mantenha a aba aberta para preservar as alterações. ${message(err)}`) }
   }, [])
-
-  const signOut = useCallback(() => {
-    sessionStorage.removeItem(SESSION_KEY)
-    localStorage.removeItem(SESSION_KEY)
-    setUser(null)
-  }, [])
-
   const changePassword = useCallback(async (currentPassword: string, newPassword: string) => {
-    const currentHash = await sha256Hex(currentPassword)
-    if (currentHash !== storedPasswordHash()) {
-      return { error: 'Senha atual incorreta.' }
-    }
-    if (newPassword.length < 6) {
-      return { error: 'A nova senha precisa ter pelo menos 6 caracteres.' }
-    }
-    localStorage.setItem(PASSWORD_KEY, await sha256Hex(newPassword))
-    return { error: null }
+    if (newPassword.length < 10) return { error: 'A nova senha precisa ter pelo menos 10 caracteres.' }
+    try {
+      const result = await apiRequest<{ csrfToken?: string }>('/api/auth/password', { method: 'POST', body: JSON.stringify({ currentPassword, newPassword }) })
+      if (result.csrfToken) setCsrfToken(result.csrfToken)
+      return { error: null }
+    } catch (err) { return { error: message(err) } }
   }, [])
-
-  const value = useMemo<AuthContextValue>(
-    () => ({ user, signIn, signOut, changePassword }),
-    [user, signIn, signOut, changePassword],
-  )
-
+  const value = useMemo<AuthContextValue>(() => ({ user, loading, error, needsSetup, bootstrapToken, refresh, setup, signIn, signOut, changePassword }), [user, loading, error, needsSetup, bootstrapToken, refresh, setup, signIn, signOut, changePassword])
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
 }
 
-// eslint-disable-next-line react-refresh/only-export-components -- hook e provider compartilham o contexto
+// eslint-disable-next-line react-refresh/only-export-components -- provider and hook share their context
 export function useAuth() {
   const ctx = useContext(AuthContext)
   if (!ctx) throw new Error('useAuth must be used within AuthProvider')

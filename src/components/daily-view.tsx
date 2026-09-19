@@ -1,3 +1,5 @@
+import { useAuth } from '../lib/auth'
+import { newId } from '../lib/id'
 import {
   DndContext,
   DragOverlay,
@@ -58,7 +60,7 @@ import { Input } from './ui/input'
 
 type QuickStudentForm = {
   name: string
-  age: string
+  birthDate: string
   parentContact: string
   isTrial: boolean
   slotId: string
@@ -67,6 +69,7 @@ type QuickStudentForm = {
 type TransferLogItem = {
   studentId: string
   targetDay: WeekdayKey
+  targetDate: string
   targetTime: string
   targetAgeGroup: string
   movedAt: string
@@ -82,6 +85,17 @@ const orderedDays: WeekdayKey[] = [
   'domingo',
 ]
 
+const emptyAttendance: Record<string, AttendanceStatus> = {}
+const emptyClassNotes: Record<string, ClassNote> = {}
+
+function nextDateForWeekday(baseDate: Date, targetDay: WeekdayKey): Date {
+  let candidate = addDays(baseDate, 1)
+  while (getWeekdayKey(candidate) !== targetDay) {
+    candidate = addDays(candidate, 1)
+  }
+  return candidate
+}
+
 function statusLabel(status: AttendanceStatus) {
   if (status === 'present') return 'Presente'
   if (status === 'absent') return 'Falta'
@@ -92,7 +106,7 @@ function statusLabel(status: AttendanceStatus) {
 function createQuickForm(slotId: string): QuickStudentForm {
   return {
     name: '',
-    age: '',
+    birthDate: '',
     parentContact: '',
     isTrial: false,
     slotId,
@@ -285,14 +299,18 @@ function ClassColumn({
 }
 
 export function DailyView() {
+  const { user } = useAuth()
   const {
     selectedDate,
     setSelectedDate,
     students,
+    dailyAttendance,
+    classNotes: classNotesByDate,
     setAttendance: storeSetAttendance,
     setAssignment: storeSetAssignment,
+    moveStudent: storeMoveStudent,
+    setClassNote: storeSetClassNote,
     getAssignmentsForDate,
-    getAttendanceForDate,
     addStudent: storeAddStudent,
   } = useStore()
 
@@ -301,8 +319,12 @@ export function DailyView() {
   const slots = useMemo(() => getScheduleForDay(dayKey), [dayKey])
   const slotIds = useMemo(() => slots.map((slot) => slot.id), [slots])
 
-  const assignments = useMemo(() => getAssignmentsForDate(selectedDate), [selectedDate, getAssignmentsForDate])
-  const attendance = useMemo(() => getAttendanceForDate(selectedDate), [selectedDate, getAttendanceForDate])
+  // Deriva diretamente dos campos persistidos para reagir a cada mutação do
+  // Zustand. Os getters são estáveis e, quando usados como única dependência de
+  // um memo, mantinham valores antigos após check-in e drag-and-drop.
+  const assignments = getAssignmentsForDate(selectedDate)
+  const attendance = dailyAttendance[dateStr] ?? emptyAttendance
+  const classNotes = classNotesByDate[dateStr] ?? emptyClassNotes
 
   const [activeStudentId, setActiveStudentId] = useState<string | null>(null)
   const [selectedStudentId, setSelectedStudentId] = useState<string | null>(null)
@@ -313,7 +335,7 @@ export function DailyView() {
   const [transferDay, setTransferDay] = useState<WeekdayKey | null>(null)
   const [transferSlotId, setTransferSlotId] = useState('')
   const [transferLog, setTransferLog] = useState<TransferLogItem[]>([])
-  const [classNotes, setClassNotes] = useState<Record<string, ClassNote>>({})
+  const [transferError, setTransferError] = useState('')
   const [noteFormSlot, setNoteFormSlot] = useState<string | null>(null)
   const [noteInput, setNoteInput] = useState('')
 
@@ -346,6 +368,7 @@ export function DailyView() {
 
   const openStudentActions = (studentId: string) => {
     setSelectedStudentId(studentId)
+    setTransferError('')
     const defaultDay = availableTransferDays[0] ?? null
     setTransferDay(defaultDay)
     if (defaultDay) {
@@ -357,7 +380,9 @@ export function DailyView() {
 
   const setPresenceStatus = (status: AttendanceStatus) => {
     if (selectedStudentId) {
-      storeSetAttendance(dateStr, selectedStudentId, status)
+      const currentSlotId = slotIds.find((slotId) => assignments[slotId]?.includes(selectedStudentId))
+      if (!currentSlotId) return
+      storeSetAttendance(dateStr, selectedStudentId, status, currentSlotId)
       setSelectedStudentId(null)
     }
   }
@@ -371,25 +396,25 @@ export function DailyView() {
 
   const handleQuickAddStudent = (e: React.FormEvent) => {
     e.preventDefault()
-    if (!quickForm.name || !quickForm.age) return
+    if (!quickForm.name.trim() || user?.role !== 'admin' || !quickForm.slotId) return
 
     const newStudent: Student = {
-      id: `stu-${Date.now()}`,
+      id: `stu-${newId()}`,
       name: quickForm.name,
-      birthDate: `${new Date().getFullYear() - Number(quickForm.age)}-01-01`,
+      birthDate: quickForm.birthDate,
       parentName: '',
       parentContact: quickForm.parentContact,
       emergencyPhone: '',
       allergies: '',
       status: 'Ativo',
       registrationStatus: 'Incompleto',
-      paymentStatus: 'Em dia',
+      paymentStatus: 'Pendente',
       mainClass: `${slots.find((s) => s.id === quickForm.slotId)?.time} (${slots.find((s) => s.id === quickForm.slotId)?.ageGroup})`,
       isTrial: quickForm.isTrial,
       photoUrl: '',
       enrolledAt: new Date().toISOString().split('T')[0],
       plan: 'Mensal',
-      monthlyFee: 150,
+      monthlyFee: 0,
       attendanceHistory: [],
       paymentHistory: [],
       physicalAssessments: [],
@@ -409,6 +434,7 @@ export function DailyView() {
   const handleTransferDayChange = (day: string) => {
     const d = day as WeekdayKey
     setTransferDay(d)
+    setTransferError('')
     const daySlots = getScheduleForDay(d)
     setTransferSlotId(daySlots[0]?.id ?? '')
   }
@@ -419,21 +445,27 @@ export function DailyView() {
     const targetSlot = transferSlots.find((s) => s.id === transferSlotId)
     if (!targetSlot) return
 
-    // Remove from current day in store
     const currentSlotId = slotIds.find((id) => assignments[id]?.includes(selectedStudentId))
-    if (currentSlotId) {
-      const remainingItems = assignments[currentSlotId].filter(id => id !== selectedStudentId)
-      storeSetAssignment(dateStr, currentSlotId, remainingItems)
+    if (!currentSlotId) return
+
+    const targetDateValue = nextDateForWeekday(selectedDate, transferDay)
+    const targetDate = format(targetDateValue, 'yyyy-MM-dd')
+    const targetAssignments = getAssignmentsForDate(targetDateValue)
+    const targetStudentIds = targetAssignments[transferSlotId] ?? []
+    if (!targetStudentIds.includes(selectedStudentId) && targetStudentIds.length >= capacityPerClass) {
+      setTransferError('A turma de destino está lotada. Escolha outro horário.')
+      return
     }
 
-    // Since we don't have a date for the target day (could be next week), 
-    // for this demo we'll just log it. In a real app we'd need to pick a target DATE.
+    storeMoveStudent(dateStr, selectedStudentId, currentSlotId, transferSlotId, targetDate)
+
     setTransferLog((prev) => {
       const withoutCurrent = prev.filter((l) => l.studentId !== selectedStudentId)
       return [
         {
           studentId: selectedStudentId,
           targetDay: transferDay,
+          targetDate,
           targetTime: targetSlot.time,
           targetAgeGroup: targetSlot.ageGroup,
           movedAt: new Date().toISOString(),
@@ -442,20 +474,18 @@ export function DailyView() {
       ].slice(0, 6)
     })
 
+    setTransferError('')
     setSelectedStudentId(null)
   }
 
   const handleSaveNote = (slotId: string) => {
     if (!noteInput.trim()) return
-    setClassNotes((prev) => ({
-      ...prev,
-      [slotId]: {
-        slotId,
-        date: dateStr,
-        content: noteInput.trim(),
-        createdAt: new Date().toISOString(),
-      },
-    }))
+    storeSetClassNote({
+      slotId,
+      date: dateStr,
+      content: noteInput.trim(),
+      createdAt: classNotes[slotId]?.createdAt ?? new Date().toISOString(),
+    })
     setNoteFormSlot(null)
     setNoteInput('')
   }
@@ -551,11 +581,11 @@ export function DailyView() {
             </div>
 
             <div className="flex items-center gap-2">
-              <Button type="button" size="sm" onClick={openAddForm} className="tactile text-xs sm:text-sm bg-primary hover:bg-primary/90 text-white border-0 shadow-glow">
+              {user?.role === 'admin' && <Button type="button" size="sm" onClick={openAddForm} className="tactile text-xs sm:text-sm bg-primary hover:bg-primary/90 text-white border-0 shadow-glow">
                 <UserPlus2 className="mr-1 h-3.5 w-3.5 sm:h-4 sm:w-4" />
                 <span className="hidden sm:inline">Matricular Aluno</span>
                 <span className="sm:hidden">Novo</span>
-              </Button>
+              </Button>}
             </div>
           </div>
         </CardHeader>
@@ -611,8 +641,8 @@ export function DailyView() {
                     <Input placeholder="Ex: João Silva" value={quickForm.name} onChange={(e) => setQuickForm((p) => ({ ...p, name: e.target.value }))} />
                   </div>
                   <div className="space-y-1">
-                    <label className="text-[10px] font-semibold text-muted-foreground ml-1 uppercase">Idade</label>
-                    <Input type="number" min={1} placeholder="Ex: 8" value={quickForm.age} onChange={(e) => setQuickForm((p) => ({ ...p, age: e.target.value }))} />
+                    <label className="text-[10px] font-semibold text-muted-foreground ml-1 uppercase">Data de nascimento (opcional)</label>
+                    <Input type="date" value={quickForm.birthDate} onChange={(e) => setQuickForm((p) => ({ ...p, birthDate: e.target.value }))} />
                   </div>
                   <div className="space-y-1">
                     <label className="text-[10px] font-semibold text-muted-foreground ml-1 uppercase">Contato dos pais</label>
@@ -648,7 +678,9 @@ export function DailyView() {
                   <div key={logItem.studentId} className="flex items-center gap-2 rounded-lg border border-border/20 bg-surface/60 px-2.5 py-1.5 text-[10px]">
                     <span className="font-semibold text-white">{studentsMap[logItem.studentId]?.name ?? 'Aluno'}</span>
                     <ArrowRight className="h-3 w-3 text-muted-foreground" />
-                    <span className="text-muted-foreground">{weekdayLabel[logItem.targetDay]} às {logItem.targetTime}</span>
+                    <span className="text-muted-foreground">
+                      {weekdayLabel[logItem.targetDay]}, {format(new Date(`${logItem.targetDate}T12:00:00`), 'dd/MM')} às {logItem.targetTime}
+                    </span>
                   </div>
                 ))}
               </CardContent>
@@ -765,13 +797,23 @@ export function DailyView() {
                   <div className="grid gap-2">
                     <select className="h-10 w-full rounded-xl border border-border/30 bg-surface px-3 text-sm text-white focus:ring-1 focus:ring-primary/50" value={transferDay ?? ''} onChange={(e) => handleTransferDayChange(e.target.value)}>
                       <option value="" disabled>Selecione o dia da semana</option>
-                      {availableTransferDays.map((w) => <option key={w} value={w}>{weekdayLabel[w]}</option>)}
+                      {availableTransferDays.map((w) => (
+                        <option key={w} value={w}>
+                          {weekdayLabel[w]} ({format(nextDateForWeekday(selectedDate, w), 'dd/MM')})
+                        </option>
+                      ))}
                     </select>
                     <select className="h-10 w-full rounded-xl border border-border/30 bg-surface px-3 text-sm text-white focus:ring-1 focus:ring-primary/50" value={transferSlotId} onChange={(e) => setTransferSlotId(e.target.value)} disabled={!transferDay}>
                       <option value="" disabled>Selecione o horário disponível</option>
                       {transferSlots.map((s) => <option key={s.id} value={s.id}>{s.time} - {s.ageGroup}</option>)}
                     </select>
                   </div>
+
+                  {transferError ? (
+                    <p className="rounded-xl border border-rose-500/25 bg-rose-500/10 px-3 py-2 text-xs text-rose-200">
+                      {transferError}
+                    </p>
+                  ) : null}
 
                   <Button type="button" className="w-full btn-glow h-11" disabled={!transferDay || !transferSlotId} onClick={transferStudent}>
                     <ArrowRightLeft className="mr-2 h-4 w-4" />

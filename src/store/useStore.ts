@@ -1,11 +1,14 @@
+import { newId } from '../lib/id.ts'
 import { create } from 'zustand'
-import { persist, createJSONStorage } from 'zustand/middleware'
 import { format } from 'date-fns'
 import {
+    type ClassNote,
+    type ClassNotesByDate,
     type CrmLead,
     type CrmMessage,
     type CrmOpportunity,
     type CrmTask,
+    type EventColumns,
     type Instructor,
     type MessageTemplate,
     type PipelineStage,
@@ -14,19 +17,11 @@ import {
     type OperationalExpense,
     type TrialClass,
 } from '../types'
-import { initialInstructors, initialStudents, initialWeeklyAssignments } from '../data/mock-data'
-import {
-    initialCrmLeads,
-    initialCrmMessages,
-    initialCrmOpportunities,
-    initialCrmTasks,
-    initialMessageTemplates,
-    initialTrialClasses,
-} from '../data/crm-data'
+import { initialMessageTemplates } from '../data/crm-data'
 import { getScheduleForDay, getWeekdayKey } from '../data/schedule'
 import { createDefaultSkillAchievements } from '../data/skills-data'
 
-interface DashboardState {
+export interface DashboardState {
     // Navigation
     selectedDate: Date
     setSelectedDate: (date: Date) => void
@@ -40,6 +35,12 @@ interface DashboardState {
 
     // date string (YYYY-MM-DD) -> studentId -> AttendanceStatus
     dailyAttendance: Record<string, Record<string, AttendanceStatus>>
+
+    // date string (YYYY-MM-DD) -> slotId -> class note
+    classNotes: ClassNotesByDate
+
+    // Event planning Kanban columns
+    eventColumns: EventColumns
 
     // Operational expenses
     operationalExpenses: OperationalExpense[]
@@ -57,9 +58,17 @@ interface DashboardState {
     updateStudent: (student: Student) => void
     deleteStudent: (studentId: string) => void
     setInstructors: (instructors: Instructor[]) => void
-    setAttendance: (date: string, studentId: string, status: AttendanceStatus) => void
+    setAttendance: (date: string, studentId: string, status: AttendanceStatus, slotId: string) => void
     setAssignment: (date: string, slotId: string, studentIds: string[]) => void
-    moveStudent: (date: string, studentId: string, fromSlotId: string, toSlotId: string) => void
+    moveStudent: (
+        sourceDate: string,
+        studentId: string,
+        fromSlotId: string,
+        toSlotId: string,
+        targetDate?: string,
+    ) => void
+    setClassNote: (note: ClassNote) => void
+    updateEventColumns: (updater: (columns: EventColumns) => EventColumns) => void
 
     // Expenses
     addExpense: (expense: OperationalExpense) => void
@@ -97,6 +106,8 @@ const backupFields = [
     'instructors',
     'dailyAssignments',
     'dailyAttendance',
+    'classNotes',
+    'eventColumns',
     'operationalExpenses',
     'crmLeads',
     'crmTasks',
@@ -108,6 +119,22 @@ const backupFields = [
 
 type BackupField = (typeof backupFields)[number]
 type BackupData = Pick<DashboardState, BackupField>
+
+function createInitialEventColumns(): EventColumns {
+    return { ideas: [], planning: [], promoting: [], done: [] }
+}
+
+function parseLocalDate(value: string): Date {
+    const [year, month, day] = value.split('-').map(Number)
+    return new Date(year, month - 1, day)
+}
+
+function defaultAssignmentsForDate(date: Date, students: Student[]): Record<string, string[]> {
+    const slots = getScheduleForDay(getWeekdayKey(date))
+    return Object.fromEntries(slots.map(slot => [slot.id, students.filter(student =>
+        student.status === 'Ativo' && student.classSlots?.includes(slot.id)
+    ).map(student => student.id)]))
+}
 
 const stageLabels: Record<PipelineStage, string> = {
     new: 'Novo Lead',
@@ -159,7 +186,7 @@ function automaticTaskForStage(lead: CrmLead, stage: PipelineStage): CrmTask | n
     }
 
     return {
-        id: `task-${crypto.randomUUID()}`,
+        id: `task-${newId()}`,
         title,
         leadId: lead.id,
         owner: lead.salesOwner || 'Danilo',
@@ -175,23 +202,24 @@ function automaticTaskForStage(lead: CrmLead, stage: PipelineStage): CrmTask | n
 // ─── Store ─────────────────────────────────────────────────────────
 
 export const useStore = create<DashboardState>()(
-    persist(
         (set, get) => ({
             selectedDate: new Date(),
             setSelectedDate: (date) => set({ selectedDate: date }),
 
-            students: initialStudents,
-            instructors: initialInstructors,
+            students: [],
+            instructors: [],
 
             dailyAssignments: {},
             dailyAttendance: {},
+            classNotes: {},
+            eventColumns: createInitialEventColumns(),
             operationalExpenses: [],
-            crmLeads: initialCrmLeads,
-            crmTasks: initialCrmTasks,
-            trialClasses: initialTrialClasses,
-            crmMessages: initialCrmMessages,
+            crmLeads: [],
+            crmTasks: [],
+            trialClasses: [],
+            crmMessages: [],
             messageTemplates: initialMessageTemplates,
-            crmOpportunities: initialCrmOpportunities,
+            crmOpportunities: [],
 
             // ── Backup local ────────────────────────────────────────
             exportBackup: () => {
@@ -200,7 +228,7 @@ export const useStore = create<DashboardState>()(
                     backupFields.map((field) => [field, state[field]]),
                 )
                 return JSON.stringify(
-                    { app: 'parkour-vicosa', version: 2, exportedAt: new Date().toISOString(), data },
+                    { app: 'parkour-vicosa', version: 3, exportedAt: new Date().toISOString(), data },
                     null,
                     2,
                 )
@@ -214,13 +242,33 @@ export const useStore = create<DashboardState>()(
                     return 'Arquivo inválido: não é um JSON válido.'
                 }
 
+                if (!parsed || typeof parsed !== 'object') return 'Backup inválido.'
                 const backup = parsed as { app?: string; data?: Partial<BackupData> }
                 const data = backup.data
                 if (backup.app !== 'parkour-vicosa' || !data || !Array.isArray(data.students)) {
                     return 'Arquivo inválido: este não é um backup do painel Parkour Viçosa.'
                 }
 
-                const updates: Partial<DashboardState> = {}
+                const arrayFields = ['students', 'instructors', 'operationalExpenses', 'crmLeads', 'crmTasks', 'trialClasses', 'crmMessages', 'messageTemplates', 'crmOpportunities'] as const
+                for (const field of arrayFields) {
+                    if (data[field] !== undefined && (!Array.isArray(data[field]) || data[field]!.some(item => !item || typeof item.id !== 'string'))) return `Lista inválida: ${field}.`
+                }
+                for (const field of ['dailyAssignments', 'dailyAttendance', 'classNotes', 'eventColumns'] as const) {
+                    if (data[field] !== undefined && (!data[field] || typeof data[field] !== 'object' || Array.isArray(data[field]))) return `Campo inválido: ${field}.`
+                }
+                for (const student of data.students) {
+                    if (typeof student.name !== 'string' || ['attendanceHistory', 'paymentHistory', 'physicalAssessments', 'conditioningTests', 'skillAchievements'].some(key => !Array.isArray(student[key as keyof Student]))) return 'Cadastro de aluno inválido no backup.'
+                }
+                for (const lead of data.crmLeads ?? []) {
+                    if (typeof lead.studentName !== 'string' || !Array.isArray(lead.history) || !Array.isArray(lead.tags)) return 'Lead inválido no backup.'
+                }
+                // Backups anteriores à versão 3 não possuem notas nem eventos
+                // persistidos. Nesses casos, usa valores seguros em vez de manter
+                // dados que já estavam abertos no navegador atual.
+                const updates: Partial<DashboardState> = {
+                    classNotes: data.classNotes ?? {},
+                    eventColumns: data.eventColumns ?? createInitialEventColumns(),
+                }
                 for (const field of backupFields) {
                     if (data[field] !== undefined) {
                         updates[field] = data[field] as never
@@ -232,17 +280,19 @@ export const useStore = create<DashboardState>()(
 
             resetAllData: () => {
                 set({
-                    students: initialStudents,
-                    instructors: initialInstructors,
+                    students: [],
+                    instructors: [],
                     dailyAssignments: {},
                     dailyAttendance: {},
+                    classNotes: {},
+                    eventColumns: createInitialEventColumns(),
                     operationalExpenses: [],
-                    crmLeads: initialCrmLeads,
-                    crmTasks: initialCrmTasks,
-                    trialClasses: initialTrialClasses,
-                    crmMessages: initialCrmMessages,
+                    crmLeads: [],
+                    crmTasks: [],
+                    trialClasses: [],
+                    crmMessages: [],
                     messageTemplates: initialMessageTemplates,
-                    crmOpportunities: initialCrmOpportunities,
+                    crmOpportunities: [],
                 })
             },
 
@@ -325,7 +375,7 @@ export const useStore = create<DashboardState>()(
                         ])),
                         history: [
                             {
-                                id: `history-${crypto.randomUUID()}`,
+                                id: `history-${newId()}`,
                                 type: 'stage',
                                 description: `Etapa alterada para ${stageLabels[stage]}`,
                                 createdAt: now,
@@ -349,11 +399,11 @@ export const useStore = create<DashboardState>()(
 
                     const studentId = `crm-${lead.id}`
                     const alreadyExists = state.students.some((student) => student.id === studentId)
-                    const birthYear = new Date().getFullYear() - (lead.age ?? 10)
+                    if (alreadyExists) return state
                     const student: Student = {
                         id: studentId,
                         name: lead.studentName,
-                        birthDate: lead.birthDate || `${birthYear}-01-01`,
+                        birthDate: lead.birthDate || '',
                         parentName: lead.guardianName,
                         parentContact: lead.whatsapp,
                         emergencyPhone: lead.whatsapp,
@@ -381,7 +431,7 @@ export const useStore = create<DashboardState>()(
                         tags: Array.from(new Set([...lead.tags.filter((tag) => tag !== 'Lead'), 'Matriculado'])),
                         history: [
                             {
-                                id: `history-${crypto.randomUUID()}`,
+                                id: `history-${newId()}`,
                                 type: 'enrollment',
                                 description: 'Lead convertido em aluno e onboarding iniciado',
                                 createdAt: now,
@@ -394,7 +444,7 @@ export const useStore = create<DashboardState>()(
                         'Enviar boas-vindas e horários',
                         'Adicionar ao grupo de WhatsApp correto',
                     ].map((title, index) => ({
-                        id: `task-${crypto.randomUUID()}`,
+                        id: `task-${newId()}`,
                         title: `${title}: ${lead.studentName}`,
                         leadId,
                         owner: lead.salesOwner || 'Danilo',
@@ -444,7 +494,7 @@ export const useStore = create<DashboardState>()(
                                 updatedAt: now,
                                 history: [
                                     {
-                                        id: `history-${crypto.randomUUID()}`,
+                                        id: `history-${newId()}`,
                                         type: 'trial' as const,
                                         description: `Aula experimental agendada para ${trial.date} às ${trial.time}`,
                                         createdAt: now,
@@ -507,7 +557,7 @@ export const useStore = create<DashboardState>()(
                                 updatedAt: message.createdAt,
                                 history: [
                                     {
-                                        id: `history-${crypto.randomUUID()}`,
+                                        id: `history-${newId()}`,
                                         type: 'message' as const,
                                         description: message.direction === 'internal'
                                             ? 'Observação interna registrada'
@@ -545,25 +595,67 @@ export const useStore = create<DashboardState>()(
                 }))
             },
 
-            setAttendance: (date, studentId, status) => {
+            setAttendance: (date, studentId, status, slotId) => {
                 set((state) => {
-                    const updated = {
-                        ...state.dailyAttendance,
-                        [date]: {
-                            ...(state.dailyAttendance[date] || {}),
-                            [studentId]: status
-                        }
+                    if (!state.students.some((student) => student.id === studentId)) return state
+                    if (status !== 'none' && !slotId) return state
+
+                    const attendanceForDate = {
+                        ...(state.dailyAttendance[date] || {}),
                     }
-                    return { dailyAttendance: updated }
+                    if (status === 'none') {
+                        delete attendanceForDate[studentId]
+                    } else {
+                        attendanceForDate[studentId] = status
+                    }
+
+                    const students = state.students.map((student) => {
+                        if (student.id !== studentId) return student
+
+                        const history = student.attendanceHistory ?? []
+                        const previousRecord = history.find(
+                            (record) => record.date === date && record.slotId === slotId,
+                        )
+                        const historyWithoutSession = history.filter(
+                            (record) => record.date !== date || record.slotId !== slotId,
+                        )
+
+                        return {
+                            ...student,
+                            attendanceHistory: status === 'none'
+                                ? historyWithoutSession
+                                : [
+                                    {
+                                        ...previousRecord,
+                                        date,
+                                        status,
+                                        slotId,
+                                    },
+                                    ...historyWithoutSession,
+                                ],
+                        }
+                    })
+
+                    return {
+                        students,
+                        dailyAttendance: {
+                            ...state.dailyAttendance,
+                            [date]: attendanceForDate,
+                        },
+                    }
                 })
             },
 
             setAssignment: (date, slotId, studentIds) => {
                 set((state) => {
+                    const assignmentsForDate = {
+                        ...defaultAssignmentsForDate(parseLocalDate(date), state.students),
+                        ...(state.dailyAssignments[date] || {}),
+                    }
                     const updated = {
                         ...state.dailyAssignments,
                         [date]: {
-                            ...(state.dailyAssignments[date] || {}),
+                            ...assignmentsForDate,
                             [slotId]: studentIds
                         }
                     }
@@ -571,57 +663,85 @@ export const useStore = create<DashboardState>()(
                 })
             },
 
-            moveStudent: (date, studentId, fromSlotId, toSlotId) => set((state) => {
-                const dateAssignments = state.dailyAssignments[date] || get().getAssignmentsForDate(new Date(date))
-                const fromItems = (dateAssignments[fromSlotId] || []).filter(id => id !== studentId)
-                const toItems = [...(dateAssignments[toSlotId] || []), studentId]
-
-                const updated = {
-                    ...state.dailyAssignments,
-                    [date]: {
-                        ...dateAssignments,
-                        [fromSlotId]: fromItems,
-                        [toSlotId]: toItems
+            moveStudent: (sourceDate, studentId, fromSlotId, toSlotId, targetDate = sourceDate) => {
+                set((state) => {
+                    const sourceAssignments = {
+                        ...defaultAssignmentsForDate(parseLocalDate(sourceDate), state.students),
+                        ...(state.dailyAssignments[sourceDate] || {}),
                     }
-                }
-                return { dailyAssignments: updated }
-            }),
+                    const sourceWithoutStudent = {
+                        ...sourceAssignments,
+                        [fromSlotId]: (sourceAssignments[fromSlotId] || []).filter((id) => id !== studentId),
+                    }
+
+                    if (sourceDate === targetDate) {
+                        const targetItems = (sourceWithoutStudent[toSlotId] || []).filter((id) => id !== studentId)
+                        return {
+                            dailyAssignments: {
+                                ...state.dailyAssignments,
+                                [sourceDate]: {
+                                    ...sourceWithoutStudent,
+                                    [toSlotId]: [...targetItems, studentId],
+                                },
+                            },
+                        }
+                    }
+
+                    const targetAssignments = {
+                        ...defaultAssignmentsForDate(parseLocalDate(targetDate), state.students),
+                        ...(state.dailyAssignments[targetDate] || {}),
+                    }
+                    const targetWithoutStudent = Object.fromEntries(
+                        Object.entries(targetAssignments).map(([slotId, ids]) => [
+                            slotId,
+                            ids.filter((id) => id !== studentId),
+                        ]),
+                    )
+
+                    return {
+                        dailyAssignments: {
+                            ...state.dailyAssignments,
+                            [sourceDate]: sourceWithoutStudent,
+                            [targetDate]: {
+                                ...targetWithoutStudent,
+                                [toSlotId]: [...(targetWithoutStudent[toSlotId] || []), studentId],
+                            },
+                        },
+                    }
+                })
+            },
+
+            setClassNote: (note) => {
+                set((state) => ({
+                    classNotes: {
+                        ...state.classNotes,
+                        [note.date]: {
+                            ...(state.classNotes[note.date] || {}),
+                            [note.slotId]: {
+                                ...note,
+                                content: note.content.trim(),
+                            },
+                        },
+                    },
+                }))
+            },
+
+            updateEventColumns: (updater) => {
+                set((state) => ({ eventColumns: updater(state.eventColumns) }))
+            },
 
             getAssignmentsForDate: (date) => {
                 const dateStr = format(date, 'yyyy-MM-dd')
                 const existing = get().dailyAssignments[dateStr]
-                if (existing) return existing
-
-                const weekday = getWeekdayKey(date)
-                const slots = getScheduleForDay(weekday)
-                const weeklyBase = initialWeeklyAssignments[weekday] || {}
-
-                return Object.fromEntries(
-                    slots.map((slot) => [slot.id, [...(weeklyBase[slot.id] || [])]])
-                )
+                return {
+                    ...defaultAssignmentsForDate(date, get().students),
+                    ...(existing || {}),
+                }
             },
 
             getAttendanceForDate: (date) => {
                 const dateStr = format(date, 'yyyy-MM-dd')
                 return get().dailyAttendance[dateStr] || {}
             }
-        }),
-        {
-            name: 'parkour-vicosa-storage',
-            storage: createJSONStorage(() => localStorage),
-            partialize: (state) => ({
-                students: state.students,
-                instructors: state.instructors,
-                dailyAssignments: state.dailyAssignments,
-                dailyAttendance: state.dailyAttendance,
-                operationalExpenses: state.operationalExpenses,
-                crmLeads: state.crmLeads,
-                crmTasks: state.crmTasks,
-                trialClasses: state.trialClasses,
-                crmMessages: state.crmMessages,
-                messageTemplates: state.messageTemplates,
-                crmOpportunities: state.crmOpportunities,
-            }),
-        }
-    )
+        })
 )

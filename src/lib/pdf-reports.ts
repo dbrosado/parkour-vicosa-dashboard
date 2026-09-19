@@ -402,7 +402,6 @@ export async function generateAcademyReport(
     s.paymentHistory.filter((p) => p.monthReference === monthRef),
   )
   const revenue = monthPayments
-    .filter((p) => p.status === 'paid')
     .reduce((sum, p) => sum + p.amountPaid, 0)
 
   const monthExpenses = expenses.filter((e) => e.monthReference === monthRef)
@@ -485,8 +484,7 @@ export async function generateAcademyReport(
   const monthlyRows: string[][] = sortedMonths.map((m) => {
     const mPayments = allPayments.filter((p) => p.monthReference === m)
     const mRevenue = mPayments
-      .filter((p) => p.status === 'paid')
-      .reduce((sum, p) => sum + p.amountPaid, 0)
+        .reduce((sum, p) => sum + p.amountPaid, 0)
     const mPending = mPayments
       .filter((p) => p.status === 'pending' || p.status === 'overdue')
       .reduce((sum, p) => sum + (p.amount - p.amountPaid), 0)

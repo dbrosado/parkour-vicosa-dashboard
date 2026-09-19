@@ -68,6 +68,7 @@ const operationMenuItems = [
 }>
 
 const menuItems = [...crmMenuItems, ...operationMenuItems]
+const trainerSections: AppSection[] = ['daily', 'weekly', 'progress', 'settings']
 
 function MenuButton({
   item,
@@ -115,20 +116,20 @@ export function Sidebar({ activeSection, onSectionChange }: NavigationProps) {
       </div>
 
       <nav className="flex-1 space-y-5 overflow-y-auto pr-1">
-        <div className="space-y-1">
+        {user?.role === 'admin' && <div className="space-y-1">
           <p className="px-3 pb-1 text-[10px] font-bold uppercase tracking-[.16em] text-muted-foreground/70">Comercial</p>
           {crmMenuItems.map((item) => <MenuButton key={item.id} item={item} activeSection={activeSection} onSectionChange={onSectionChange} />)}
-        </div>
+        </div>}
         <div className="space-y-1">
           <p className="px-3 pb-1 text-[10px] font-bold uppercase tracking-[.16em] text-muted-foreground/70">Operação da academia</p>
-          {operationMenuItems.map((item) => <MenuButton key={item.id} item={item} activeSection={activeSection} onSectionChange={onSectionChange} />)}
+          {operationMenuItems.filter((item) => user?.role === 'admin' || trainerSections.includes(item.id)).map((item) => <MenuButton key={item.id} item={item} activeSection={activeSection} onSectionChange={onSectionChange} />)}
         </div>
       </nav>
 
       <div className="mt-4 flex items-center justify-between gap-3 rounded-2xl border border-border/20 bg-surface-gradient p-4 shadow-soft-sm">
         <div className="min-w-0">
-          <p className="truncate font-display text-sm font-semibold text-white">{user?.name ?? 'Painel local'}</p>
-          <p className="truncate text-xs text-muted-foreground">Dados salvos neste computador</p>
+          <p className="truncate font-display text-sm font-semibold text-white">{user?.name ?? 'Minha conta'}</p>
+          <p className="truncate text-xs text-muted-foreground">{user?.role === 'admin' ? 'Administrador' : 'Treinador'}</p>
         </div>
         <button
           type="button"
@@ -145,6 +146,7 @@ export function Sidebar({ activeSection, onSectionChange }: NavigationProps) {
 }
 
 export function MobileTopBar({ activeSection, onSectionChange }: NavigationProps) {
+  const { user, signOut } = useAuth()
   const [open, setOpen] = useState(false)
   const sectionLabel = menuItems.find((item) => item.id === activeSection)?.label ?? 'Dashboard'
 
@@ -173,12 +175,13 @@ export function MobileTopBar({ activeSection, onSectionChange }: NavigationProps
           <div className="ml-auto h-full w-[88%] max-w-sm overflow-y-auto border-l border-border/40 bg-[#101010] p-4">
             <div className="mb-4 flex items-center justify-between">
               <div><p className="font-display font-semibold text-white">Navegação</p><p className="text-xs text-muted-foreground">CRM & Gestão</p></div>
-              <button type="button" onClick={() => setOpen(false)} className="flex h-10 w-10 items-center justify-center rounded-xl border border-border/40"><X className="h-5 w-5" /></button>
+              <button type="button" aria-label="Fechar menu" onClick={() => setOpen(false)} className="flex h-10 w-10 items-center justify-center rounded-xl border border-border/40"><X className="h-5 w-5" /></button>
             </div>
             <div className="space-y-5">
-              <div className="space-y-1"><p className="px-3 pb-1 text-[10px] font-bold uppercase tracking-[.16em] text-muted-foreground">Comercial</p>{crmMenuItems.map((item) => <div key={item.id} onClick={() => setOpen(false)}><MenuButton item={item} activeSection={activeSection} onSectionChange={onSectionChange} /></div>)}</div>
-              <div className="space-y-1"><p className="px-3 pb-1 text-[10px] font-bold uppercase tracking-[.16em] text-muted-foreground">Operação</p>{operationMenuItems.map((item) => <div key={item.id} onClick={() => setOpen(false)}><MenuButton item={item} activeSection={activeSection} onSectionChange={onSectionChange} /></div>)}</div>
+              {user?.role === 'admin' && <div className="space-y-1"><p className="px-3 pb-1 text-[10px] font-bold uppercase tracking-[.16em] text-muted-foreground">Comercial</p>{crmMenuItems.map((item) => <div key={item.id} onClick={() => setOpen(false)}><MenuButton item={item} activeSection={activeSection} onSectionChange={onSectionChange} /></div>)}</div>}
+              <div className="space-y-1"><p className="px-3 pb-1 text-[10px] font-bold uppercase tracking-[.16em] text-muted-foreground">Operação</p>{operationMenuItems.filter((item) => user?.role === 'admin' || trainerSections.includes(item.id)).map((item) => <div key={item.id} onClick={() => setOpen(false)}><MenuButton item={item} activeSection={activeSection} onSectionChange={onSectionChange} /></div>)}</div>
             </div>
+            <button type="button" onClick={() => void signOut()} className="mt-5 flex w-full items-center gap-2 rounded-xl border border-border/40 p-3 text-sm"><LogOut className="h-4 w-4" />Sair de {user?.name}</button>
           </div>
         </div>
       ) : null}
@@ -187,7 +190,8 @@ export function MobileTopBar({ activeSection, onSectionChange }: NavigationProps
 }
 
 export function MobileBottomNav({ activeSection, onSectionChange }: NavigationProps) {
-  const mobileItems = [
+  const { user } = useAuth()
+  const mobileItems = user?.role === 'trainer' ? operationMenuItems.filter((item) => trainerSections.includes(item.id)) : [
     crmMenuItems[0],
     crmMenuItems[2],
     crmMenuItems[3],

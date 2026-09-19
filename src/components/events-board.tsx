@@ -28,38 +28,32 @@ import {
 import { useMemo, useState } from 'react'
 
 import { cn } from '../lib/utils'
+import { useStore } from '../store/useStore'
+import { type EventColumnId, type EventTask } from '../types'
 import { Badge } from './ui/badge'
 import { Button } from './ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card'
 import { Input } from './ui/input'
 
-type ColumnId = 'ideas' | 'planning' | 'promoting' | 'done'
-
-type EventTask = {
-  id: string
-  title: string
-  date: string
-}
-
 type CalendarEvent = EventTask & {
-  columnId: ColumnId
+  columnId: EventColumnId
 }
 
-const columnMeta: Array<{ id: ColumnId; title: string; icon: typeof Sparkles }> = [
+const columnMeta: Array<{ id: EventColumnId; title: string; icon: typeof Sparkles }> = [
   { id: 'ideas', title: 'Ideias', icon: Sparkles },
   { id: 'planning', title: 'Planejando', icon: Rocket },
   { id: 'promoting', title: 'Divulgando', icon: Megaphone },
   { id: 'done', title: 'Concluído', icon: Check },
 ]
 
-const stageLabel: Record<ColumnId, string> = {
+const stageLabel: Record<EventColumnId, string> = {
   ideas: 'Ideias',
   planning: 'Planejando',
   promoting: 'Divulgando',
   done: 'Concluído',
 }
 
-const stageDotColors: Record<ColumnId, string> = {
+const stageDotColors: Record<EventColumnId, string> = {
   ideas: 'bg-blue-400',
   planning: 'bg-indigo-400',
   promoting: 'bg-cyan-400',
@@ -78,12 +72,6 @@ function toIsoDate(date: Date): string {
 function fromIsoDate(value: string): Date {
   const [year, month, day] = value.split('-').map(Number)
   return new Date(year, month - 1, day)
-}
-
-function addDays(base: Date, amount: number): Date {
-  const next = new Date(base)
-  next.setDate(base.getDate() + amount)
-  return next
 }
 
 function addMonths(base: Date, amount: number): Date {
@@ -121,29 +109,14 @@ function buildMonthCells(monthDate: Date): Array<{ iso: string | null; day: numb
 
 const todayIso = toIsoDate(new Date())
 
-const initialTasks: Record<ColumnId, EventTask[]> = {
-  ideas: [
-    { id: 'evt-1', title: 'Campeonato Interno', date: toIsoDate(addDays(new Date(), 5)) },
-    { id: 'evt-2', title: 'Sessão de fotos outdoor', date: toIsoDate(addDays(new Date(), 12)) },
-  ],
-  planning: [
-    { id: 'evt-3', title: 'Workshop de Férias', date: toIsoDate(addDays(new Date(), 9)) },
-    { id: 'evt-4', title: 'Aula aberta para iniciantes', date: toIsoDate(addDays(new Date(), 15)) },
-  ],
-  promoting: [
-    { id: 'evt-5', title: 'Campanha Instagram - turma kids', date: toIsoDate(addDays(new Date(), 2)) },
-  ],
-  done: [{ id: 'evt-6', title: 'Treino especial de sábado', date: toIsoDate(addDays(new Date(), -3)) }],
-}
-
-const emptyDrafts: Record<ColumnId, string> = {
+const emptyDrafts: Record<EventColumnId, string> = {
   ideas: '',
   planning: '',
   promoting: '',
   done: '',
 }
 
-const emptyDraftDates: Record<ColumnId, string> = {
+const emptyDraftDates: Record<EventColumnId, string> = {
   ideas: todayIso,
   planning: todayIso,
   promoting: todayIso,
@@ -184,7 +157,7 @@ function EventColumn({
   onDraftDateChange,
   onAddTask,
 }: {
-  id: ColumnId
+  id: EventColumnId
   title: string
   Icon: typeof Sparkles
   tasks: EventTask[]
@@ -259,7 +232,7 @@ function EventColumn({
 }
 
 export function EventsBoard() {
-  const [columns, setColumns] = useState(initialTasks)
+  const { eventColumns: columns, updateEventColumns } = useStore()
   const [drafts, setDrafts] = useState(emptyDrafts)
   const [draftDates, setDraftDates] = useState(emptyDraftDates)
   const [activeTaskId, setActiveTaskId] = useState<string | null>(null)
@@ -333,7 +306,7 @@ export function EventsBoard() {
     if (!sourceColumn || !targetColumn) return
 
     if (sourceColumn === targetColumn) {
-      setColumns((previous) => {
+      updateEventColumns((previous) => {
         const sourceCards = previous[sourceColumn]
         const oldIndex = sourceCards.findIndex((task) => task.id === activeId)
         const newIndex =
@@ -347,7 +320,7 @@ export function EventsBoard() {
       return
     }
 
-    setColumns((previous) => {
+    updateEventColumns((previous) => {
       const sourceCards = [...previous[sourceColumn]]
       const targetCards = [...previous[targetColumn]]
       const sourceIndex = sourceCards.findIndex((task) => task.id === activeId)
@@ -366,12 +339,12 @@ export function EventsBoard() {
     })
   }
 
-  const addTask = (columnId: ColumnId) => {
+  const addTask = (columnId: EventColumnId) => {
     const title = drafts[columnId].trim()
     if (!title) return
     const date = draftDates[columnId] || selectedDate
 
-    setColumns((previous) => ({
+    updateEventColumns((previous) => ({
       ...previous,
       [columnId]: [...previous[columnId], { id: `evt-${Date.now()}`, title, date }],
     }))

@@ -1,3 +1,4 @@
+import { newId } from '../../lib/id.ts'
 import {
   AlertTriangle,
   Check,
@@ -16,20 +17,19 @@ import {
   Wifi,
   WifiOff,
 } from 'lucide-react'
-import { useEffect, useMemo, useState, type FormEvent } from 'react'
+import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 
 import { cn } from '../../lib/utils'
 import { formatDate, formatDateTime, isOverdue, stageLabel, temperatureMeta } from '../../lib/crm-utils'
 import { useStore } from '../../store/useStore'
 import {
-  whatsappProvider,
+  whatsappProvider, safeToRetrySend, whatsappLink, messageStatusLabel,
   type WhatsAppConnectionSnapshot,
 } from '../../lib/whatsapp-provider'
 import type {
   CrmTask,
   CrmTaskPriority,
   CrmTaskType,
-  MessageStatus,
   MessageTemplate,
   TrialClass,
   TrialCommercialResult,
@@ -147,7 +147,7 @@ function TaskFormModal({ open, onClose, onAdd }: { open: boolean; onClose: () =>
     event.preventDefault()
     if (!title.trim() || !leadId) return
     onAdd({
-      id: `task-${crypto.randomUUID()}`,
+      id: `task-${newId()}`,
       title: title.trim(),
       leadId,
       owner: 'Danilo',
@@ -308,7 +308,7 @@ function TrialReviewModal({ trial, leadName, onClose, onSave }: { trial: TrialCl
 }
 
 export function CrmInboxView() {
-  const { crmLeads, crmMessages, messageTemplates, addCrmMessage } = useStore()
+  const { crmLeads, crmMessages, messageTemplates } = useStore()
   const [search, setSearch] = useState('')
   const [filter, setFilter] = useState<'all' | 'unanswered' | 'hot'>('all')
   const [selectedLeadId, setSelectedLeadId] = useState(crmLeads[0]?.id ?? '')
@@ -317,6 +317,8 @@ export function CrmInboxView() {
   const [templateId, setTemplateId] = useState('')
   const [waConnected, setWaConnected] = useState(false)
   const [sending, setSending] = useState(false)
+  const [sendError, setSendError] = useState('')
+  const requestKey = useRef({ key: '', id: '' })
 
   // Detecta a sessão do WhatsApp para alternar entre envio direto e modo manual
   useEffect(() => {
@@ -368,28 +370,18 @@ export function CrmInboxView() {
     if (!selectedLead || !content.trim() || selectedLead.doNotContact || sending) return
     const text = content.trim()
 
-    let status: MessageStatus = 'sent'
-    if (waConnected) {
-      setSending(true)
-      try {
-        await whatsappProvider.sendMessage(selectedLead.whatsapp, text)
-      } catch {
-        status = 'failed'
-      } finally {
-        setSending(false)
-      }
-    }
-
-    addCrmMessage({
-      id: `message-${crypto.randomUUID()}`,
-      leadId: selectedLead.id,
-      direction: 'outgoing',
-      channel: 'whatsapp',
-      content: text,
-      status,
-      createdAt: new Date().toISOString(),
-    })
-    setContent('')
+    if (!waConnected) { setSendError('Conecte o WhatsApp para enviar pelo painel ou abra a conversa no celular.'); return }
+    const key = `${selectedLead.id}:${text}`
+    if (requestKey.current.key !== key) requestKey.current = {key, id: newId()}
+    setSending(true)
+    setSendError('')
+    try {
+      const result = await whatsappProvider.sendMessage(selectedLead.id, text, requestKey.current.id)
+      if (!['sent', 'delivered', 'read'].includes(result.message.status)) throw new Error(result.message.error || 'Envio não confirmado. Confira o histórico e o celular antes de repetir.')
+      requestKey.current = {key: '', id: ''}
+      setContent('')
+    } catch (error) { if (safeToRetrySend(error)) requestKey.current = {key: '', id: ''}; setSendError(error instanceof Error ? error.message : 'Não foi possível enviar. O texto foi preservado.') }
+    finally { setSending(false) }
     setTemplateId('')
   }
 
@@ -432,23 +424,24 @@ export function CrmInboxView() {
                 <p>{message.content}</p>
                 <p className="mt-1 text-[10px] opacity-55">
                   {formatDateTime(message.createdAt)}
-                  {message.status === 'failed' ? <span className="ml-1.5 font-semibold text-rose-300 opacity-100">· falhou, tente de novo</span> : null}
+                  <span className="ml-1.5">· {messageStatusLabel[message.status] || message.status}</span>{message.error && <span> · {message.error}</span>}
                 </p>
               </div>
             ))}
           </div>
           <div className="space-y-2 border-t border-border/30 p-3">
             {selectedLead.doNotContact ? <p className="rounded-xl border border-rose-500/25 bg-rose-500/10 p-2 text-xs text-rose-200">Este lead está marcado como “não contactar”.</p> : null}
+            <p role="alert" className="text-xs text-rose-300">{sendError}</p>
             <div className="grid gap-2 sm:grid-cols-[220px_1fr]">
               <Select value={templateId} onChange={(event) => fillTemplate(event.target.value)}><option value="">Usar template...</option>{messageTemplates.filter((item) => item.active).map((template) => <option key={template.id} value={template.id}>{template.name}</option>)}</Select>
-              <div className="flex gap-2"><Input value={content} onChange={(event) => setContent(event.target.value)} placeholder={waConnected ? 'Escreva e envie direto pelo painel...' : 'Escreva a resposta...'} onKeyDown={(event) => { if (event.key === 'Enter') void registerSend() }} /><Button size="icon" onClick={() => void registerSend()} disabled={selectedLead.doNotContact || sending}>{sending ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}</Button></div>
+              <div className="flex gap-2"><Input value={content} onChange={(event) => setContent(event.target.value)} placeholder={waConnected ? 'Escreva e envie direto pelo painel...' : 'Escreva a resposta...'} onKeyDown={(event) => { if (event.key === 'Enter') void registerSend() }} /><Button size="icon" onClick={() => void registerSend()} aria-label="Enviar mensagem" disabled={selectedLead.doNotContact || sending || !waConnected || !content.trim()}>{sending ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}</Button></div>
             </div>
             <div className="flex items-center justify-between gap-3">
               <span className={cn('inline-flex items-center gap-1.5 text-[11px]', waConnected ? 'text-emerald-300' : 'text-muted-foreground')}>
                 {waConnected ? <Wifi className="h-3.5 w-3.5" /> : <WifiOff className="h-3.5 w-3.5" />}
-                {waConnected ? 'WhatsApp conectado — envio direto pelo painel' : 'Modo manual — registre aqui e envie pelo wa.me'}
+                {waConnected ? 'WhatsApp conectado — envio direto pelo painel' : 'Desconectado — conecte o WhatsApp para enviar pelo painel'}
               </span>
-              <a href={`https://wa.me/55${selectedLead.whatsapp.replace(/\D/g, '')}?text=${encodeURIComponent(content)}`} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1.5 text-xs text-emerald-300 hover:text-emerald-200">Abrir conversa no WhatsApp <ExternalLink className="h-3.5 w-3.5" /></a>
+              <a href={whatsappLink(selectedLead.whatsapp, content)} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1.5 text-xs text-emerald-300 hover:text-emerald-200">Abrir conversa no WhatsApp <ExternalLink className="h-3.5 w-3.5" /></a>
             </div>
           </div>
         </div>
@@ -501,7 +494,7 @@ function TemplateFormModal({ initial, onClose, onAdd, onUpdate }: { initial: Mes
   const [active, setActive] = useState(initial?.active ?? true)
   const submit = (event: FormEvent) => {
     event.preventDefault()
-    const template: MessageTemplate = { id: initial?.id ?? `template-${crypto.randomUUID()}`, name, category, content, active, channel: 'whatsapp' }
+    const template: MessageTemplate = { id: initial?.id ?? `template-${newId()}`, name, category, content, active, channel: 'whatsapp' }
     if (initial) onUpdate(template)
     else onAdd(template)
     onClose()
@@ -530,57 +523,70 @@ export function CrmWhatsAppView() {
   const [snapshot, setSnapshot] = useState<WhatsAppConnectionSnapshot>({ status: 'disconnected' })
   const [loading, setLoading] = useState(false)
 
-  const refresh = async () => {
+  const requestVersion = useRef(0)
+  const actionPending = useRef(false)
+
+  const runAction = async (action: () => Promise<WhatsAppConnectionSnapshot>) => {
+    const version = ++requestVersion.current
+    actionPending.current = true
     setLoading(true)
     try {
-      setSnapshot(await whatsappProvider.getStatus())
-    } catch {
-      setSnapshot({ status: 'error', error: 'O servidor local do WhatsApp não respondeu. Feche e abra o painel de novo (npm run dev) — ele sobe junto automaticamente.' })
+      const result = await action()
+      if (version === requestVersion.current) setSnapshot(result)
+    } catch (error) {
+      if (version === requestVersion.current) setSnapshot({ status: 'error', error: error instanceof Error ? error.message : 'O serviço não respondeu. Verifique a conexão e tente novamente.' })
     } finally {
+      actionPending.current = false
       setLoading(false)
     }
   }
+  const refresh = () => runAction(() => whatsappProvider.getStatus())
 
   useEffect(() => {
-    void refresh()
+    let stopped = false
+    const versions = requestVersion
+    let timer: ReturnType<typeof setTimeout>
+    const poll = async () => {
+      if (!actionPending.current) {
+        const version = ++requestVersion.current
+        try {
+          const result = await whatsappProvider.getStatus()
+          if (!stopped && version === requestVersion.current) setSnapshot(result)
+        } catch {
+          if (!stopped && version === requestVersion.current) setSnapshot({ status: 'error', error: 'Sem comunicação com o servidor. Tentando novamente…' })
+        }
+      }
+      if (!stopped) timer = setTimeout(poll, 2000)
+    }
+    void poll()
+    return () => { stopped = true; clearTimeout(timer); ++versions.current }
   }, [])
 
-  // Acompanha a geração do QR e a leitura pelo celular sem precisar clicar em atualizar
   useEffect(() => {
-    if (snapshot.status !== 'connecting' && snapshot.status !== 'waiting_qr') return
-    const timer = setInterval(async () => {
-      try {
-        setSnapshot(await whatsappProvider.getStatus())
-      } catch {
-        // servidor pode estar reiniciando; mantém o estado atual
-      }
-    }, 2500)
-    return () => clearInterval(timer)
-  }, [snapshot.status])
+    if (snapshot.status !== 'waiting_qr' || !snapshot.qrExpiresAt) return
+    const expiresAt = snapshot.qrExpiresAt
+    const timer = setTimeout(() => setSnapshot(current => current.qrExpiresAt === expiresAt
+      ? { status: 'connecting', error: 'Aguardando a renovação do QR Code…' } : current), Math.max(0, Date.parse(expiresAt) - Date.now()))
+    return () => clearTimeout(timer)
+  }, [snapshot.status, snapshot.qrExpiresAt])
 
-  const connect = async () => {
-    setLoading(true)
+  const connect = () => {
     setSnapshot({ status: 'connecting' })
-    try {
-      setSnapshot(await whatsappProvider.connect())
-    } catch {
-      setSnapshot({ status: 'error', error: 'Não foi possível iniciar a sessão. Feche e abra o painel de novo (npm run dev) e tente outra vez.' })
-    } finally {
-      setLoading(false)
-    }
+    return runAction(() => whatsappProvider.connect())
   }
-
-  const disconnect = async () => {
-    setLoading(true)
-    try {
+  const disconnect = () => runAction(async () => {
+    await whatsappProvider.disconnect()
+    return { status: 'disconnected' }
+  })
+  const reset = () => {
+    setSnapshot({ status: 'connecting' })
+    return runAction(async () => {
       await whatsappProvider.disconnect()
-      setSnapshot({ status: 'disconnected' })
-    } catch {
-      setSnapshot({ status: 'error', error: 'Não foi possível desconectar a sessão.' })
-    } finally {
-      setLoading(false)
-    }
+      return whatsappProvider.connect()
+    })
   }
+  const hasQr = snapshot.status === 'waiting_qr' && snapshot.qrCodeDataUrl && snapshot.qrExpiresAt && Date.parse(snapshot.qrExpiresAt) > Date.now()
+  const busy = snapshot.status === 'connecting' || snapshot.status === 'waiting_qr'
 
   const meta = statusMeta[snapshot.status]
   const StatusIcon = meta.icon
@@ -595,19 +601,22 @@ export function CrmWhatsAppView() {
           </div>
         </CardHeader>
         <CardContent className="space-y-4">
-          {snapshot.qrCodeDataUrl ? (
+          {hasQr ? (
             <div className="mx-auto max-w-xs rounded-3xl bg-white p-5"><img src={snapshot.qrCodeDataUrl} alt="QR Code para conectar WhatsApp" className="w-full" /></div>
           ) : (
             <div className="flex min-h-64 flex-col items-center justify-center rounded-3xl border border-dashed border-border/40 bg-black/10 p-8 text-center">
-              <QrCode className="h-16 w-16 text-muted-foreground/40" />
-              <p className="mt-4 font-display text-sm font-semibold text-white">QR Code de conexão</p>
-              <p className="mt-1 max-w-sm text-xs leading-relaxed text-muted-foreground">Ao iniciar a conexão, o backend do provedor gera o QR Code sem expor tokens ou a sessão no navegador.</p>
+              {snapshot.status === 'connected' ? <Wifi className="h-12 w-12 text-emerald-400" /> : busy ? <RefreshCw className="h-12 w-12 animate-spin text-sky-400" /> : <WifiOff className="h-12 w-12 text-muted-foreground" />}
+              <p className="mt-4 font-display text-sm font-semibold text-white">{snapshot.status === 'connected' ? 'WhatsApp conectado' : busy ? 'Aguardando o WhatsApp…' : 'Nenhum QR Code disponível'}</p>
+              <p className="mt-1 max-w-sm text-xs leading-relaxed text-muted-foreground">{snapshot.status === 'connected' ? 'Abra a Inbox WhatsApp para atender seus clientes.' : busy ? 'O código aparecerá aqui assim que o WhatsApp responder. Depois de escanear, aguarde a confirmação da conexão.' : 'Clique em Gerar QR Code. Se a sessão estiver com erro, use Reiniciar sessão.'}</p>
             </div>
           )}
-          {snapshot.phoneNumber ? <p className="text-center text-sm text-white">Número conectado: <strong>{snapshot.phoneNumber}</strong></p> : null}
+          {hasQr ? <p className="text-center text-xs text-muted-foreground">Escaneie com seu WhatsApp em Dispositivos conectados. O código é renovado automaticamente.</p> : null}
+          {snapshot.status === 'connected' && snapshot.phoneNumber ? <p className="text-center text-sm text-white">Número conectado: <strong>{snapshot.phoneNumber}</strong></p> : null}
           {snapshot.error ? <p className="rounded-xl border border-rose-500/25 bg-rose-500/10 p-3 text-xs text-rose-200">{snapshot.error}</p> : null}
           <div className="flex flex-wrap justify-center gap-2">
-            {snapshot.status === 'connected' ? <Button variant="destructive" onClick={disconnect} disabled={loading}><Power className="mr-2 h-4 w-4" />Desconectar</Button> : <Button onClick={connect} disabled={loading}><QrCode className="mr-2 h-4 w-4" />Gerar QR Code</Button>}
+            {snapshot.status !== 'connected' && <Button onClick={connect} disabled={loading || busy}><Smartphone className="mr-2 h-4 w-4" />Gerar QR Code</Button>}
+            {(snapshot.status === 'connected' || busy) && <Button variant="destructive" onClick={disconnect} disabled={loading}><Power className="mr-2 h-4 w-4" />{snapshot.status === 'connected' ? 'Desconectar' : 'Cancelar conexão'}</Button>}
+            {!busy && snapshot.status !== 'connected' && <Button variant="secondary" onClick={reset} disabled={loading}>Reiniciar sessão</Button>}
             <Button variant="secondary" onClick={refresh} disabled={loading}><RefreshCw className={cn('mr-2 h-4 w-4', loading && 'animate-spin')} />Atualizar status</Button>
           </div>
         </CardContent>
@@ -621,14 +630,14 @@ export function CrmWhatsAppView() {
               <p>1. Clique em <strong className="text-white/80">Gerar QR Code</strong> e aguarde o código aparecer (o servidor sobe junto com o painel, nada para instalar ou rodar à parte).</p>
               <p>2. No celular: WhatsApp → Configurações → Dispositivos conectados → Conectar dispositivo, e aponte a câmera para o QR.</p>
               <p>3. A sessão fica salva neste computador — nas próximas vezes conecta sozinho, sem QR.</p>
-              <p>4. Se aparecer erro de conexão, feche e abra o painel de novo (<code className="rounded bg-black/30 px-1.5 py-0.5 text-emerald-300">npm run dev</code>).</p>
+              <p>4. Se aparecer erro de sessão, clique em Reiniciar sessão e escaneie o novo código. Mantenha o celular com internet até aparecer Conectado.</p>
             </div>
           </CardContent>
         </Card>
         <Card className="border-border/30">
           <CardHeader><CardTitle className="text-base">Como funciona</CardTitle></CardHeader>
           <CardContent className="space-y-3 text-sm text-muted-foreground">
-            <p>A conexão usa o mesmo mecanismo do WhatsApp Web, rodando 100% neste computador — nenhum dado passa por serviços de terceiros.</p>
+            <p>A conexão usa o Baileys, uma integração não oficial com o WhatsApp Web. As mensagens passam pelo WhatsApp e ficam registradas no servidor da academia. O servidor precisa continuar ligado e com internet.</p>
             <p>Com a sessão conectada, a Inbox envia as mensagens direto pelo painel. Sem conexão, ela continua no modo manual com histórico, templates e abertura pelo <code>wa.me</code>.</p>
             <p className="rounded-xl border border-amber-500/20 bg-amber-500/5 p-3 text-xs text-amber-200/80">Use com moderação: envios em massa podem levar o WhatsApp a restringir o número. Prefira mensagens individuais para leads que iniciaram contato.</p>
           </CardContent>

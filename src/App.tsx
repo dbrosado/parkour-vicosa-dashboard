@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react'
+import { AlertTriangle, CheckCircle2, Download, Loader2, RefreshCw } from 'lucide-react'
 
 import { BirthdayView } from './components/birthday-view'
 import { DailyView } from './components/daily-view'
@@ -22,6 +23,8 @@ import {
   CrmWhatsAppView,
 } from './components/crm/crm-operations'
 import { useAuth } from './lib/auth'
+import { useDataSync } from './lib/data-sync'
+import { Button } from './components/ui/button'
 import { useStore } from './store/useStore'
 import { type AppSection } from './types'
 
@@ -100,21 +103,35 @@ const sectionCopy: Record<AppSection, { title: string; subtitle: string }> = {
   },
   settings: {
     title: 'Preferências Gerais',
-    subtitle: 'Conta local, backup e preferências da academia.',
+    subtitle: 'Sua conta, acesso da equipe e backup do servidor.',
   },
 }
 
-function App() {
-  const { user } = useAuth()
-  const [activeSection, setActiveSection] = useState<AppSection>('crm-dashboard')
+function Dashboard() {
+  const { user, loading, signOut } = useAuth()
+  const sync = useDataSync(Boolean(user), user?.id)
+  const [requestedSection, setRequestedSection] = useState<AppSection>('crm-dashboard')
+  const trainerSections: AppSection[] = ['daily', 'weekly', 'progress', 'settings']
+  const activeSection = user?.role === 'trainer' && !trainerSections.includes(requestedSection) ? 'daily' : requestedSection
+  const setActiveSection = (section: AppSection) => { if (user?.role === 'admin' || trainerSections.includes(section)) setRequestedSection(section) }
   const { students, instructors, addStudent, updateStudent, setInstructors } = useStore()
 
   const copy = useMemo(() => sectionCopy[activeSection] || sectionCopy.daily, [activeSection])
 
-  if (!user) {
+  if (loading || !user) {
     return <LoginPage />
   }
 
+  if (!sync.ready) return (
+    <div className="flex min-h-screen items-center justify-center px-4"><div className="w-full max-w-lg space-y-4 rounded-2xl border border-border/30 bg-surface/70 p-6"><h1 className="font-display text-xl">Abrindo os dados da academia</h1><p role="status" className="flex items-center gap-2 text-sm text-muted-foreground">{sync.status === 'connecting' && <Loader2 className="h-4 w-4 animate-spin" />}{sync.error || 'Aguarde a resposta do servidor.'}</p><div className="flex gap-2"><Button onClick={() => void sync.retry()} disabled={sync.status === 'connecting'}>Tentar novamente</Button><Button variant="outline" onClick={() => void signOut()}>Sair</Button></div></div></div>
+  )
+
+  const blocked = sync.status === 'offline' || sync.status === 'error' || sync.status === 'connecting'
+  const downloadPending = () => {
+    const url = URL.createObjectURL(new Blob([useStore.getState().exportBackup()], { type: 'application/json' }))
+    const link = document.createElement('a'); link.href = url; link.download = `alteracoes-pendentes-${new Date().toISOString().slice(0, 10)}.json`; link.click()
+    setTimeout(() => URL.revokeObjectURL(url), 1000)
+  }
   const renderSection = () => {
     switch (activeSection) {
       case 'crm-dashboard':
@@ -154,9 +171,9 @@ function App() {
       case 'birthdays':
         return <BirthdayView students={students} />
       case 'settings':
-        return <SettingsView />
+        return <SettingsView canBackup={sync.status === 'synced'} />
       default:
-        return <SettingsView />
+        return <SettingsView canBackup={sync.status === 'synced'} />
     }
   }
 
@@ -168,13 +185,14 @@ function App() {
         <Sidebar activeSection={activeSection} onSectionChange={setActiveSection} />
 
         <main className="w-full flex-1 px-3 pb-24 pt-3 sm:px-5 lg:p-8 lg:pb-8">
+          <div role={blocked ? 'alert' : 'status'} className={`mb-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border p-3 text-sm ${blocked ? 'border-amber-500/40 bg-amber-500/10 text-amber-200' : 'border-border/25 bg-surface/40 text-muted-foreground'}`}><div className="flex items-start gap-2">{sync.status === 'saving' ? <Loader2 className="mt-0.5 h-4 w-4 shrink-0 animate-spin" /> : blocked ? <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" /> : <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-400" />}<div><p>{sync.status === 'saving' ? 'Salvando no servidor — aguarde antes de sair.' : blocked ? 'Edições pausadas até confirmar o salvamento no servidor.' : 'Dados salvos no servidor'}</p>{sync.error && <p className="mt-1 text-xs">{sync.error}</p>}</div></div>{blocked && <div className="flex flex-wrap gap-2"><Button size="sm" variant="outline" className="gap-2" onClick={() => void sync.retry()}><RefreshCw className="h-4 w-4" />Tentar novamente</Button>{user.role === 'admin' && <Button size="sm" variant="outline" className="gap-2" onClick={downloadPending}><Download className="h-4 w-4" />Salvar cópia pendente</Button>}<Button size="sm" variant="outline" onClick={() => { if (window.confirm('Recarregar os dados do servidor? As alterações ainda não salvas deste aparelho serão descartadas. Salve uma cópia pendente antes, se necessário.')) void sync.refresh() }}>Recarregar do servidor</Button></div>}</div>
           {/* Section Header */}
           <div className="animate-mount mb-4 rounded-2xl border border-border/20 bg-surface-gradient p-4 shadow-soft-sm sm:p-5 lg:mb-5">
             <h1 className="font-display text-lg font-semibold text-white sm:text-xl lg:text-2xl">{copy.title}</h1>
             <p className="mt-1 text-xs text-muted-foreground sm:text-sm">{copy.subtitle}</p>
           </div>
 
-          <div className="animate-mount" style={{ animationDelay: '80ms' }}>
+          <div className="animate-mount" inert={blocked} aria-disabled={blocked} style={{ animationDelay: '80ms', opacity: blocked ? 0.5 : 1 }}>
             {renderSection()}
           </div>
         </main>
@@ -185,4 +203,9 @@ function App() {
   )
 }
 
+function App() {
+  const {user, loading} = useAuth()
+  if (loading || !user) return <LoginPage />
+  return <Dashboard key={user.id} />
+}
 export default App

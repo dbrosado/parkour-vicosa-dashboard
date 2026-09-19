@@ -34,4 +34,7 @@ dist-ssr
 .vercel
 
 # Sessão local do WhatsApp (nunca versionar)
-server/.wa-session/
+server/.wa-session*/
+
+# Estado compartilhado do CRM (dados reais, nunca versionar)
+server/data/

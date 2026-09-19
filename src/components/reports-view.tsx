@@ -215,7 +215,7 @@ function OverviewTab() {
         let receitaMensal = 0
         for (const student of students) {
             for (const p of student.paymentHistory) {
-                if (p.monthReference === currentMonth && p.status === 'paid') {
+                if (p.monthReference === currentMonth) {
                     receitaMensal += p.amountPaid
                 }
             }
@@ -401,11 +401,11 @@ function FinancialTab({
             for (const p of student.paymentHistory) {
                 if (p.monthReference === currentMonth) {
                     totalCount++
-                    if (p.status === 'paid') {
-                        receitaMes += p.amountPaid
+                    receitaMes += p.amountPaid
+                    if (p.amountPaid >= p.amount) {
                         pagoCount++
                     } else {
-                        pendenteMes += p.amount
+                        pendenteMes += Math.max(0, p.amount - p.amountPaid)
                     }
                 }
             }
@@ -433,11 +433,8 @@ function FinancialTab({
                 for (const p of student.paymentHistory) {
                     if (p.monthReference === monthRef) {
                         count++
-                        if (p.status === 'paid') {
-                            revenue += p.amountPaid
-                        } else {
-                            pending += p.amount
-                        }
+                        revenue += p.amountPaid
+                        pending += Math.max(0, p.amount - p.amountPaid)
                     }
                 }
             }
@@ -464,7 +461,7 @@ function FinancialTab({
         let revenue = 0
         for (const student of students) {
             for (const p of student.paymentHistory) {
-                if (p.monthReference === expenseMonth && p.status === 'paid') {
+                if (p.monthReference === expenseMonth) {
                     revenue += p.amountPaid
                 }
             }

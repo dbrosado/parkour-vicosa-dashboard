@@ -1,84 +1,37 @@
-export type WhatsAppConnectionStatus =
-  | 'disconnected'
-  | 'waiting_qr'
-  | 'connecting'
-  | 'connected'
-  | 'error'
-
-export interface WhatsAppConnectionSnapshot {
-  status: WhatsAppConnectionStatus
-  phoneNumber?: string
-  qrCodeDataUrl?: string
-  error?: string
-}
-
+import { apiRequest, ApiError } from './api'
+import { flushData, refreshData } from './data-sync'
+import type { CrmMessage } from '../types'
+export type WhatsAppConnectionStatus = 'disconnected' | 'waiting_qr' | 'connecting' | 'connected' | 'error'
+export interface WhatsAppConnectionSnapshot { status: WhatsAppConnectionStatus; phoneNumber?: string; qrCodeDataUrl?: string; qrExpiresAt?: string; error?: string }
 export interface WhatsAppProvider {
   getStatus(): Promise<WhatsAppConnectionSnapshot>
   connect(): Promise<WhatsAppConnectionSnapshot>
   disconnect(): Promise<void>
-  sendMessage(phone: string, content: string): Promise<{ externalId: string }>
+  sendMessage(leadId: string, content: string, clientMessageId: string): Promise<{externalId: string; message: CrmMessage}>
 }
-
-// Endereço direto do servidor local, usado quando o proxy do Vite não responde
-const DIRECT_BASE = 'http://127.0.0.1:3901'
-
-class ApiWhatsAppProvider implements WhatsAppProvider {
-  private base: string | null = null
-
-  private async attempt<T>(base: string, path: string, init?: RequestInit): Promise<T> {
-    const response = await fetch(`${base}/api/whatsapp${path}`, {
-      headers: { 'Content-Type': 'application/json' },
-      ...init,
-    })
-
-    const contentType = response.headers.get('content-type') ?? ''
-    if (!response.ok || !contentType.includes('application/json')) {
-      const detail = contentType.includes('application/json') ? await response.text() : ''
-      throw new Error(detail || 'O servidor local do WhatsApp não respondeu.')
-    }
-
-    return response.json() as Promise<T>
-  }
-
-  private async request<T>(path: string, init?: RequestInit): Promise<T> {
-    if (this.base !== null) {
-      return this.attempt<T>(this.base, path, init)
-    }
-
-    // Tenta o proxy do Vite primeiro; sem ele, fala direto com o servidor local
+export const whatsappProvider: WhatsAppProvider = {
+  getStatus: () => apiRequest('/api/whatsapp/status'),
+  connect: () => apiRequest('/api/whatsapp/connect', {method: 'POST', body: '{}'}),
+  disconnect: async () => { await apiRequest('/api/whatsapp/disconnect', {method: 'POST', body: '{}'}) },
+  async sendMessage(leadId, content, clientMessageId) {
+    await flushData()
     try {
-      const result = await this.attempt<T>('', path, init)
-      this.base = ''
-      return result
-    } catch (proxyError) {
-      try {
-        const result = await this.attempt<T>(DIRECT_BASE, path, init)
-        this.base = DIRECT_BASE
-        return result
-      } catch {
-        throw proxyError
-      }
-    }
-  }
-
-  getStatus() {
-    return this.request<WhatsAppConnectionSnapshot>('/status')
-  }
-
-  connect() {
-    return this.request<WhatsAppConnectionSnapshot>('/connect', { method: 'POST' })
-  }
-
-  async disconnect() {
-    await this.request<{ ok: boolean }>('/disconnect', { method: 'POST' })
-  }
-
-  sendMessage(phone: string, content: string) {
-    return this.request<{ externalId: string }>('/messages', {
-      method: 'POST',
-      body: JSON.stringify({ phone, content }),
-    })
-  }
+      return await apiRequest('/api/whatsapp/messages', {method: 'POST', body: JSON.stringify({leadId, content, clientMessageId})})
+    } finally { void refreshData().catch(() => {}) }
+  },
+}
+export function whatsappLink(phone: string, content = '') {
+  let digits = phone.replace(/\D/g, '')
+  if (digits.startsWith('00')) digits = digits.slice(2)
+  if (digits.length === 10 || digits.length === 11) digits = `55${digits}`
+  return `https://wa.me/${digits}?text=${encodeURIComponent(content)}`
+}
+export const messageStatusLabel: Record<string, string> = {
+  received: 'Recebida', pending: 'Enviando', uncertain: 'Envio não confirmado — confira no celular', sent: 'Enviada', delivered: 'Entregue', read: 'Lida', failed: 'Falha no envio',
 }
 
-export const whatsappProvider: WhatsAppProvider = new ApiWhatsAppProvider()
+export function safeToRetrySend(error: unknown): boolean {
+  if (!(error instanceof ApiError)) return false
+  const details = error.details as {message?: {status?: string}} | undefined
+  return details?.message?.status === 'failed'
+}

@@ -1,3 +1,6 @@
+import { newId } from '../lib/id.ts'
+import { getScheduleForDay, weekdayLabel } from '../data/schedule'
+import type { WeekdayKey } from '../types'
 import {
   AlertTriangle,
   CalendarCheck,
@@ -77,6 +80,7 @@ interface StudentFormState {
   emergencyPhone: string
   allergies: string
   mainClass: string
+  classSlots: string[]
   plan: PlanType
   monthlyFee: string
   isTrial: boolean
@@ -91,6 +95,7 @@ const emptyForm: StudentFormState = {
   emergencyPhone: '',
   allergies: '',
   mainClass: '',
+  classSlots: [],
   plan: 'Mensal',
   monthlyFee: '',
   isTrial: false,
@@ -131,6 +136,7 @@ export function StudentsTable({ students, onAddStudent, onUpdateStudent }: Stude
         status: form.status,
         registrationStatus: form.birthDate && form.parentName && form.parentContact ? 'Completo' : 'Incompleto',
         mainClass: form.mainClass.trim(),
+        classSlots: form.classSlots,
         isTrial: form.isTrial,
         plan: form.plan,
         monthlyFee: Number(form.monthlyFee) || 0,
@@ -138,9 +144,8 @@ export function StudentsTable({ students, onAddStudent, onUpdateStudent }: Stude
       onUpdateStudent(updatedStudent)
     } else {
       // Create new student
-      const now = Date.now()
       const newStudent: Student = {
-        id: `stu-${now}`,
+        id: `stu-${newId()}`,
         name: form.name.trim(),
         birthDate: form.birthDate,
         parentName: form.parentName.trim(),
@@ -151,6 +156,7 @@ export function StudentsTable({ students, onAddStudent, onUpdateStudent }: Stude
         registrationStatus: 'Incompleto',
         paymentStatus: 'Pendente',
         mainClass: form.mainClass.trim(),
+        classSlots: form.classSlots,
         isTrial: form.isTrial,
         photoUrl: '',
         enrolledAt: new Date().toISOString().slice(0, 10),
@@ -186,6 +192,7 @@ export function StudentsTable({ students, onAddStudent, onUpdateStudent }: Stude
       emergencyPhone: student.emergencyPhone,
       allergies: student.allergies,
       mainClass: student.mainClass,
+      classSlots: student.classSlots ?? [],
       plan: student.plan,
       monthlyFee: student.monthlyFee.toString(),
       isTrial: student.isTrial,
@@ -312,6 +319,20 @@ export function StudentsTable({ students, onAddStudent, onUpdateStudent }: Stude
                   onChange={(e) => updateField('mainClass', e.target.value)}
                 />
               </div>
+
+              <fieldset className="space-y-2 sm:col-span-2">
+                <legend className="text-sm font-medium">Horários fixos da semana</legend>
+                <p className="text-xs text-muted-foreground">Marque os horários para que o aluno apareça automaticamente nas turmas dos próximos dias.</p>
+                <div className="grid gap-2 sm:grid-cols-3">
+                  {(['segunda', 'terca', 'quarta', 'quinta', 'sexta', 'sabado'] as WeekdayKey[]).map(day => <div key={day} className="rounded-xl border border-border/30 p-2">
+                    <p className="mb-1 text-xs font-semibold">{weekdayLabel[day]}</p>
+                    {getScheduleForDay(day).map(slot => <label key={slot.id} className="flex items-center gap-2 py-1 text-xs">
+                      <input type="checkbox" checked={form.classSlots.includes(slot.id)} onChange={e => updateField('classSlots', e.target.checked ? [...form.classSlots, slot.id] : form.classSlots.filter(id => id !== slot.id))} />
+                      {slot.time} · {slot.ageGroup}
+                    </label>)}
+                  </div>)}
+                </div>
+              </fieldset>
 
               {/* Plan Select */}
               <div>

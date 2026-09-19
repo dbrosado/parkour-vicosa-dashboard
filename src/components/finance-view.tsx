@@ -1,3 +1,4 @@
+import { createMonthlyCharge, paymentBalance, paymentState, receivePayment } from '../lib/finance'
 import {
   AlertTriangle,
   ArrowDownLeft,
@@ -79,6 +80,10 @@ export function FinanceView({ students, onUpdateStudent }: FinanceViewProps) {
   const [formMonth, setFormMonth] = useState(getCurrentMonthRef())
   const [formAmount, setFormAmount] = useState('')
   const [formMethod, setFormMethod] = useState<PaymentMethod>('Pix')
+  const [formError, setFormError] = useState('')
+  const [chargeMonth, setChargeMonth] = useState(getCurrentMonthRef())
+  const [dueDay, setDueDay] = useState(10)
+  const [chargeMessage, setChargeMessage] = useState('')
 
   const currentMonth = getCurrentMonthRef()
 
@@ -87,7 +92,7 @@ export function FinanceView({ students, onUpdateStudent }: FinanceViewProps) {
     const rows: PaymentRow[] = []
     for (const student of students) {
       for (const payment of student.paymentHistory) {
-        rows.push({ student, payment })
+        rows.push({ student, payment: {...payment, status: paymentState(payment)} })
       }
     }
     // Sort by date descending
@@ -105,15 +110,15 @@ export function FinanceView({ students, onUpdateStudent }: FinanceViewProps) {
     for (const { payment } of allPayments) {
       if (payment.monthReference === currentMonth) {
         totalCountThisMonth++
+        revenueThisMonth += payment.amountPaid
         if (payment.status === 'paid') {
-          revenueThisMonth += payment.amountPaid
           paidCountThisMonth++
         }
         if (payment.status === 'pending' || payment.status === 'overdue') {
-          totalPendingOverdue += payment.amount
+          totalPendingOverdue += paymentBalance(payment)
         }
       } else if (payment.status === 'pending' || payment.status === 'overdue') {
-        totalPendingOverdue += payment.amount
+        totalPendingOverdue += paymentBalance(payment)
       }
     }
 
@@ -150,7 +155,8 @@ export function FinanceView({ students, onUpdateStudent }: FinanceViewProps) {
     setSelectedStudentId(studentId)
     const student = students.find((s) => s.id === studentId)
     if (student) {
-      setFormAmount(String(student.monthlyFee))
+      const invoice = student.paymentHistory.find(p => p.monthReference === formMonth)
+      setFormAmount(String(invoice ? paymentBalance(invoice) : student.monthlyFee))
     }
   }
 
@@ -159,6 +165,7 @@ export function FinanceView({ students, onUpdateStudent }: FinanceViewProps) {
     setFormMonth(getCurrentMonthRef())
     setFormAmount('')
     setFormMethod('Pix')
+    setFormError('')
     setShowForm(true)
   }
 
@@ -170,27 +177,8 @@ export function FinanceView({ students, onUpdateStudent }: FinanceViewProps) {
     const amount = parseFloat(formAmount)
     if (isNaN(amount) || amount <= 0) return
 
-    const now = new Date()
-    const newPayment: PaymentRecord = {
-      id: `pay-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-      date: now.toISOString().split('T')[0],
-      monthReference: formMonth,
-      amount: student.monthlyFee,
-      amountPaid: amount,
-      description: `Mensalidade ${formatMonthYear(formMonth)}`,
-      status: 'paid',
-      paymentMethod: formMethod,
-      paidAt: now.toISOString().split('T')[0],
-      plan: student.plan,
-    }
-
-    const updatedStudent: Student = {
-      ...student,
-      paymentHistory: [newPayment, ...student.paymentHistory],
-      paymentStatus: 'Em dia',
-    }
-
-    onUpdateStudent(updatedStudent)
+    try { onUpdateStudent(receivePayment(student, formMonth, amount, formMethod)) }
+    catch (error) { setFormError(error instanceof Error ? error.message : 'Não foi possível registrar.'); return }
     setShowForm(false)
     setSelectedStudentId('')
     setFormMonth(getCurrentMonthRef())
@@ -200,7 +188,7 @@ export function FinanceView({ students, onUpdateStudent }: FinanceViewProps) {
 
   const summaryCards = [
     {
-      title: 'Receita do mês',
+      title: 'Recebido da competência',
       value: formatCurrency(summary.revenueThisMonth),
       subtitle: formatMonthYear(currentMonth),
       icon: ArrowUpRight,
@@ -258,6 +246,23 @@ export function FinanceView({ students, onUpdateStudent }: FinanceViewProps) {
           </div>
         </CardHeader>
       </Card>
+
+      <Card><CardContent className="space-y-3 p-4">
+        <p className="text-sm font-semibold">Gerar mensalidades</p>
+        <p className="text-xs text-muted-foreground">Cria uma cobrança por aluno ativo pagante no mês escolhido. Cobranças existentes são preservadas. Não envia mensagens ou cobra cartões.</p>
+        <div className="flex flex-wrap items-end gap-3">
+          <label className="text-xs">Competência<Input aria-label="Competência das cobranças" type="month" value={chargeMonth} onChange={e => setChargeMonth(e.target.value)} /></label>
+          <label className="text-xs">Dia do vencimento<Input aria-label="Dia do vencimento" type="number" min="1" max="28" value={dueDay} onChange={e => setDueDay(Number(e.target.value))} /></label>
+          <Button onClick={() => {
+            try {
+              const updates = students.map(student => createMonthlyCharge(student, chargeMonth, dueDay)).filter((student, i) => student !== students[i])
+              updates.forEach(onUpdateStudent)
+              setChargeMessage(`${updates.length} cobrança(s) criada(s). As já existentes foram preservadas.`)
+            } catch (error) { setChargeMessage(error instanceof Error ? error.message : 'Não foi possível gerar.') }
+          }}>Gerar cobranças</Button>
+        </div>
+        <p role="status" className="text-xs">{chargeMessage}</p>
+      </CardContent></Card>
 
       {/* Summary Cards */}
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4 stagger-children">
@@ -362,6 +367,7 @@ export function FinanceView({ students, onUpdateStudent }: FinanceViewProps) {
                 </div>
               </div>
 
+              <p role="alert" className="text-xs text-rose-300 sm:col-span-2">{formError}</p>
               {/* Actions */}
               <div className="flex justify-end gap-2 sm:col-span-2">
                 <Button type="button" variant="ghost" onClick={() => setShowForm(false)}>

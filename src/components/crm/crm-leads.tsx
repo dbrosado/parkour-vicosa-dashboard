@@ -1,3 +1,5 @@
+import { newId } from '../../lib/id.ts'
+import { whatsappProvider, safeToRetrySend, messageStatusLabel } from '../../lib/whatsapp-provider'
 import {
   DndContext,
   DragOverlay,
@@ -23,7 +25,7 @@ import {
   Search,
   Send,
 } from 'lucide-react'
-import { useMemo, useState, type FormEvent } from 'react'
+import { useMemo, useRef, useState, type FormEvent } from 'react'
 
 import { cn } from '../../lib/utils'
 import {
@@ -37,7 +39,6 @@ import {
 import { useStore } from '../../store/useStore'
 import type {
   CrmLead,
-  CrmMessage,
   CrmTask,
   LeadSource,
   LeadStudentType,
@@ -92,7 +93,7 @@ function localDateTime(dayOffset = 0, hour = 10): string {
 function createLeadDraft(): CrmLead {
   const now = new Date().toISOString()
   return {
-    id: `lead-${crypto.randomUUID()}`,
+    id: `lead-${newId()}`,
     studentName: '',
     guardianName: '',
     whatsapp: '',
@@ -127,7 +128,7 @@ function createLeadDraft(): CrmLead {
     lastContactAt: now,
     history: [
       {
-        id: `history-${crypto.randomUUID()}`,
+        id: `history-${newId()}`,
         type: 'stage',
         description: 'Lead criado manualmente',
         createdAt: now,
@@ -311,7 +312,7 @@ function TrialForm({
     const nextDay = new Date(`${date}T${time}:00`)
     nextDay.setDate(nextDay.getDate() + 1)
     const trial: TrialClass = {
-      id: `trial-${crypto.randomUUID()}`,
+      id: `trial-${newId()}`,
       leadId: lead.id,
       date,
       time,
@@ -380,6 +381,9 @@ export function LeadDetailModal({
   const [message, setMessage] = useState('')
   const [selectedTemplate, setSelectedTemplate] = useState('')
   const [internalNote, setInternalNote] = useState(false)
+  const [sending, setSending] = useState(false)
+  const [sendError, setSendError] = useState('')
+  const requestKey = useRef({key: '', id: ''})
 
   if (!lead) return null
 
@@ -393,7 +397,7 @@ export function LeadDetailModal({
     const dueAt = new Date()
     dueAt.setDate(dueAt.getDate() + 1)
     const task: CrmTask = {
-      id: `task-${crypto.randomUUID()}`,
+      id: `task-${newId()}`,
       title: `Follow-up com ${lead.guardianName || lead.studentName}`,
       leadId: lead.id,
       owner: lead.salesOwner || 'Danilo',
@@ -413,20 +417,22 @@ export function LeadDetailModal({
     })
   }
 
-  const sendMessage = () => {
-    if (!message.trim() || lead.doNotContact) return
-    const item: CrmMessage = {
-      id: `message-${crypto.randomUUID()}`,
-      leadId: lead.id,
-      direction: internalNote ? 'internal' : 'outgoing',
-      channel: internalNote ? 'internal' : 'whatsapp',
-      content: message.trim(),
-      status: internalNote ? 'sent' : 'sent',
-      createdAt: new Date().toISOString(),
-    }
-    addCrmMessage(item)
-    setMessage('')
-    setSelectedTemplate('')
+  const sendMessage = async () => {
+    if (!message.trim() || sending || (!internalNote && lead.doNotContact)) return
+    setSending(true); setSendError('')
+    try {
+      if (internalNote) {
+        addCrmMessage({id: `note-${newId()}`, leadId: lead.id, direction: 'internal', channel: 'internal', content: message.trim(), status: 'sent', createdAt: new Date().toISOString()})
+      } else {
+        const key = `${lead.id}:${message.trim()}`
+        if (requestKey.current.key !== key) requestKey.current = {key, id: newId()}
+        const result = await whatsappProvider.sendMessage(lead.id, message.trim(), requestKey.current.id)
+        if (!['sent', 'delivered', 'read'].includes(result.message.status)) throw new Error(result.message.error || 'Envio não confirmado. Confira no celular antes de repetir.')
+        requestKey.current = {key: '', id: ''}
+      }
+      setMessage(''); setSelectedTemplate('')
+    } catch (error) { if (safeToRetrySend(error)) requestKey.current = {key: '', id: ''}; setSendError(error instanceof Error ? error.message : 'Falha no envio. O texto foi preservado.') }
+    finally { setSending(false) }
   }
 
   const fillTemplate = (templateId: string) => {
@@ -512,7 +518,7 @@ export function LeadDetailModal({
                         )}
                       >
                         <p>{item.content}</p>
-                        <p className="mt-1 text-[10px] opacity-55">{formatDateTime(item.createdAt)}</p>
+                        <p className="mt-1 text-[10px] opacity-55">{formatDateTime(item.createdAt)} · {messageStatusLabel[item.status] || item.status}</p>
                       </div>
                     ))}
                   </div>
@@ -523,6 +529,7 @@ export function LeadDetailModal({
                       <option key={template.id} value={template.id}>{template.name}</option>
                     ))}
                   </Select>
+                  <p role="alert" className="text-xs text-rose-300">{sendError}</p>
                   <Textarea
                     value={message}
                     onChange={(event) => setMessage(event.target.value)}
@@ -533,9 +540,9 @@ export function LeadDetailModal({
                       <input type="checkbox" checked={internalNote} onChange={(event) => setInternalNote(event.target.checked)} />
                       Nota interna
                     </label>
-                    <Button size="sm" onClick={sendMessage} disabled={lead.doNotContact && !internalNote}>
+                    <Button size="sm" onClick={() => void sendMessage()} disabled={sending || (!internalNote && lead.doNotContact)}>
                       <Send className="mr-1.5 h-4 w-4" />
-                      {internalNote ? 'Registrar nota' : 'Registrar envio'}
+                      {sending ? 'Enviando...' : internalNote ? 'Registrar nota' : 'Enviar WhatsApp'}
                     </Button>
                   </div>
                 </CardContent>

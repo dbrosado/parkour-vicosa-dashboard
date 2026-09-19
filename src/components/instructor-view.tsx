@@ -1,3 +1,4 @@
+import { newId } from '../lib/id'
 import {
     Briefcase,
     Calendar,
@@ -54,7 +55,7 @@ export function InstructorView({ instructors, onUpdateInstructors }: InstructorV
         e.preventDefault()
         if (!newForm.name.trim() || !newForm.phone.trim()) return
         const newInstructor: Instructor = {
-            id: `inst-${Date.now()}`,
+            id: `inst-${newId()}`,
             name: newForm.name.trim(),
             role: newForm.role,
             photoUrl: '',
@@ -161,14 +162,14 @@ export function InstructorView({ instructors, onUpdateInstructors }: InstructorV
                     </CardHeader>
                     <CardContent>
                         <form onSubmit={handleAddInstructor} className="grid gap-3 sm:grid-cols-2">
-                            <Input placeholder="Nome" value={newForm.name} onChange={(e) => setNewForm((p) => ({ ...p, name: e.target.value }))} />
-                            <Input placeholder="Telefone" value={newForm.phone} onChange={(e) => setNewForm((p) => ({ ...p, phone: e.target.value }))} />
+                            <Input required aria-label="Nome do professor" placeholder="Nome" value={newForm.name} onChange={(e) => setNewForm((p) => ({ ...p, name: e.target.value }))} />
+                            <Input required type="tel" aria-label="Telefone do professor" placeholder="Telefone" value={newForm.phone} onChange={(e) => setNewForm((p) => ({ ...p, phone: e.target.value }))} />
                             <select className="h-10 rounded-xl border border-border/30 bg-surface px-3 text-sm text-white" value={newForm.role} onChange={(e) => setNewForm((p) => ({ ...p, role: e.target.value }))}>
                                 <option>Professor Principal</option>
                                 <option>Assistente</option>
                                 <option>Estagiária</option>
                             </select>
-                            <Input type="number" placeholder="Carga horária máxima" value={newForm.maxHours} onChange={(e) => setNewForm((p) => ({ ...p, maxHours: e.target.value }))} />
+                            <Input required min="1" max="168" type="number" placeholder="Carga horária máxima" value={newForm.maxHours} onChange={(e) => setNewForm((p) => ({ ...p, maxHours: e.target.value }))} />
                             <div className="flex justify-end gap-2 sm:col-span-2">
                                 <Button type="button" variant="ghost" onClick={() => setShowAddForm(false)}>Cancelar</Button>
                                 <Button type="submit" className="btn-glow">Salvar</Button>

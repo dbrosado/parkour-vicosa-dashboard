@@ -62,6 +62,8 @@ export interface AttendanceRecord {
 }
 
 export interface PaymentRecord {
+  dueDate?: string
+  receipts?: {id: string; date: string; amount: number; method: PaymentMethod}[]
   id: string
   date: string
   monthReference: string
@@ -118,6 +120,7 @@ export interface Student {
   registrationStatus: RegistrationStatus
   paymentStatus: PaymentStatus
   mainClass: string
+  classSlots?: string[]
   isTrial: boolean
   photoUrl: string
   enrolledAt: string
@@ -159,6 +162,18 @@ export interface ClassNote {
   content: string
   createdAt: string
 }
+
+export type ClassNotesByDate = Record<string, Record<string, ClassNote>>
+
+export type EventColumnId = 'ideas' | 'planning' | 'promoting' | 'done'
+
+export interface EventTask {
+  id: string
+  title: string
+  date: string
+}
+
+export type EventColumns = Record<EventColumnId, EventTask[]>
 
 export type ExpenseCategory =
   | 'aluguel'
@@ -328,9 +343,12 @@ export interface TrialClass {
 }
 
 export type MessageDirection = 'incoming' | 'outgoing' | 'internal'
-export type MessageStatus = 'received' | 'sent' | 'delivered' | 'read' | 'failed'
+export type MessageStatus = 'received' | 'pending' | 'uncertain' | 'sent' | 'delivered' | 'read' | 'failed'
 
 export interface CrmMessage {
+  externalId?: string
+  clientMessageId?: string
+  error?: string
   id: string
   leadId: string
   direction: MessageDirection
