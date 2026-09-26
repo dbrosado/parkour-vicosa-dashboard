@@ -20,9 +20,12 @@ import { createEmptyData, normalizeData, filterState, authorizedData } from './v
 import { atomicJson } from './storage.mjs'
 import { lockDataDirectory } from './instance-lock.mjs'
 import { createWhatsAppConnection } from './wa-connection.mjs'
+import { parseWhatsAppVersion } from './wa-version.mjs'
 import pino from 'pino'
 import QRCode from 'qrcode'
 
+const webVersion = parseWhatsAppVersion(process.env.WA_WEB_VERSION)
+if (webVersion) console.log('[whatsapp] protocolo configurado:', webVersion.join('.'))
 const PORT = Number(process.env.WHATSAPP_PORT || 3901)
 const SERVER_DIR = dirname(fileURLToPath(import.meta.url))
 const ROOT_DIR = resolve(SERVER_DIR, '..')
@@ -155,7 +158,7 @@ function stateEtag(state) {
 const sendOperations = new Map()
 const whatsapp = createWhatsAppConnection({
   directory: SESSION_DIR,
-  makeSocket: auth => makeWASocket({auth,logger,qrTimeout:20000,markOnlineOnConnect:false,syncFullHistory:false,connectTimeoutMs:30000,defaultQueryTimeoutMs:30000,getMessage:async key=>{const current=await getSharedState();const message=current.data.crmMessages.find(x=>x.externalId===key.id);return message ? {conversation:message.content} : undefined}}),
+  makeSocket: auth => makeWASocket({auth,logger,...(webVersion ? {version:webVersion} : {}),markOnlineOnConnect:false,syncFullHistory:false,connectTimeoutMs:30000,defaultQueryTimeoutMs:30000,getMessage:async key=>{const current=await getSharedState();const message=current.data.crmMessages.find(x=>x.externalId===key.id);return message ? {conversation:message.content} : undefined}}),
   renderQr: qr => QRCode.toDataURL(qr,{width:320,margin:2}),
   onSocket: registerMessageHandlers,
   onStatus: next => console.log(`[whatsapp] status: ${next.status}${next.error ? ` — ${next.error}` : ''}`),
@@ -570,6 +573,14 @@ export const server = createServer(async (req,res) => {
         if(process.env.WA_DISABLED==='true')throw new HttpError(503,'WhatsApp desativado neste ambiente de teste.')
         await startSocket()
         return json(res,200,whatsapp.snapshot)
+      }
+      if(route==='POST /api/whatsapp/pairing-code'){
+        const body=await readJsonBody(req,4096)
+        if(!isRecord(body)||typeof body.phoneNumber!=='string'||body.phoneNumber.length>40)throw new HttpError(400,'Informe o número do WhatsApp com DDD.')
+        const phone=normalizePhoneDigits(body.phoneNumber)
+        if(!/^[1-9][0-9]{9,14}$/.test(phone))throw new HttpError(400,'Número de WhatsApp inválido.')
+        if(process.env.WA_DISABLED==='true')throw new HttpError(503,'WhatsApp desativado neste ambiente de teste.')
+        return json(res,200,await whatsapp.pairWithPhone(phone))
       }
       if(route==='POST /api/whatsapp/disconnect'){await stopSocket(true);return json(res,200,{ok:true})}
       if(route==='POST /api/whatsapp/messages'){const result=await sendCrmMessage(await readJsonBody(req,128*1024));return json(res,result.message.status==='failed'?409:200,{...result,...(result.message.error?{error:result.message.error}:{})})}

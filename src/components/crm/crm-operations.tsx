@@ -295,7 +295,7 @@ function TrialReviewModal({ trial, leadName, onClose, onSave }: { trial: TrialCl
               <option value="pending">Pendente</option><option value="enrolled">Fechou</option><option value="thinking">Vai pensar</option><option value="no_response">Sem resposta</option><option value="not_interested">Não fechou</option><option value="reschedule">Remarcar</option>
             </Select>
           </Field>
-          <Field label="Próximo follow-up"><Input type="datetime-local" value={localDateTime(draft.nextFollowUpAt)} onChange={(event) => setValue('nextFollowUpAt', new Date(event.target.value).toISOString())} /></Field>
+          <Field label="Próximo follow-up"><Input type="datetime-local" value={localDateTime(draft.nextFollowUpAt)} onChange={(event) => setValue('nextFollowUpAt', event.target.value ? new Date(event.target.value).toISOString() : '')} /></Field>
         </div>
         <div className="grid gap-3 sm:grid-cols-2">
           <label className="flex items-center gap-3 rounded-xl border border-border/30 p-3 text-sm text-white"><input type="checkbox" checked={draft.planPresented} onChange={(event) => setValue('planPresented', event.target.checked)} />O plano foi apresentado?</label>
@@ -513,7 +513,9 @@ function TemplateFormModal({ initial, onClose, onAdd, onUpdate }: { initial: Mes
 
 const statusMeta: Record<WhatsAppConnectionSnapshot['status'], { label: string; className: string; icon: typeof Wifi }> = {
   disconnected: { label: 'Desconectado', className: 'text-zinc-300 bg-zinc-500/10 border-zinc-500/25', icon: WifiOff },
-  waiting_qr: { label: 'Aguardando QR Code', className: 'text-amber-300 bg-amber-500/10 border-amber-500/25', icon: QrCode },
+  waiting_qr: { label: 'Aguardando leitura no celular', className: 'text-amber-300 bg-amber-500/10 border-amber-500/25', icon: QrCode },
+  waiting_code: { label: 'Confirme o código no celular', className: 'text-amber-300 bg-amber-500/10 border-amber-500/25', icon: Smartphone },
+  pairing: { label: 'Confirmando vínculo', className: 'text-sky-300 bg-sky-500/10 border-sky-500/25', icon: RefreshCw },
   connecting: { label: 'Conectando', className: 'text-sky-300 bg-sky-500/10 border-sky-500/25', icon: RefreshCw },
   connected: { label: 'Conectado', className: 'text-emerald-300 bg-emerald-500/10 border-emerald-500/25', icon: Wifi },
   error: { label: 'Erro de conexão', className: 'text-rose-300 bg-rose-500/10 border-rose-500/25', icon: AlertTriangle },
@@ -522,6 +524,8 @@ const statusMeta: Record<WhatsAppConnectionSnapshot['status'], { label: string; 
 export function CrmWhatsAppView() {
   const [snapshot, setSnapshot] = useState<WhatsAppConnectionSnapshot>({ status: 'disconnected' })
   const [loading, setLoading] = useState(false)
+  const [phoneNumber, setPhoneNumber] = useState('')
+  const [usePhone, setUsePhone] = useState(false)
 
   const requestVersion = useRef(0)
   const actionPending = useRef(false)
@@ -563,12 +567,12 @@ export function CrmWhatsAppView() {
   }, [])
 
   useEffect(() => {
-    if (snapshot.status !== 'waiting_qr' || !snapshot.qrExpiresAt) return
-    const expiresAt = snapshot.qrExpiresAt
-    const timer = setTimeout(() => setSnapshot(current => current.qrExpiresAt === expiresAt
-      ? { status: 'connecting', error: 'Aguardando a renovação do QR Code…' } : current), Math.max(0, Date.parse(expiresAt) - Date.now()))
+    const expiresAt = snapshot.status === 'waiting_qr' ? snapshot.qrExpiresAt : snapshot.status === 'waiting_code' ? snapshot.pairingExpiresAt : undefined
+    if (!expiresAt) return
+    const timer = setTimeout(() => setSnapshot(current => (current.qrExpiresAt === expiresAt || current.pairingExpiresAt === expiresAt)
+      ? { status: 'connecting', detail: current.status === 'waiting_code' ? 'Código vencido. Aguardando liberação para tentar novamente…' : 'Aguardando um novo QR do WhatsApp…' } : current), Math.max(0, Date.parse(expiresAt) - Date.now()))
     return () => clearTimeout(timer)
-  }, [snapshot.status, snapshot.qrExpiresAt])
+  }, [snapshot.status, snapshot.qrExpiresAt, snapshot.pairingExpiresAt])
 
   const connect = () => {
     setSnapshot({ status: 'connecting' })
@@ -586,7 +590,13 @@ export function CrmWhatsAppView() {
     })
   }
   const hasQr = snapshot.status === 'waiting_qr' && snapshot.qrCodeDataUrl && snapshot.qrExpiresAt && Date.parse(snapshot.qrExpiresAt) > Date.now()
-  const busy = snapshot.status === 'connecting' || snapshot.status === 'waiting_qr'
+  const hasCode = snapshot.status === 'waiting_code' && snapshot.pairingCode && snapshot.pairingExpiresAt && Date.parse(snapshot.pairingExpiresAt) > Date.now()
+  const busy = ['connecting', 'waiting_qr', 'waiting_code', 'pairing'].includes(snapshot.status)
+  const pairByPhone = (event: FormEvent) => {
+    event.preventDefault()
+    setSnapshot({ status: 'connecting', detail: 'Solicitando vínculo pelo número…' })
+    return runAction(() => whatsappProvider.pairWithPhone(phoneNumber))
+  }
 
   const meta = statusMeta[snapshot.status]
   const StatusIcon = meta.icon
@@ -601,20 +611,40 @@ export function CrmWhatsAppView() {
           </div>
         </CardHeader>
         <CardContent className="space-y-4">
-          {hasQr ? (
+          {hasCode ? (
+            <div className="space-y-4 rounded-2xl border border-amber-400/30 bg-amber-400/5 p-6 text-center">
+              <p className="text-sm text-muted-foreground">No WhatsApp de {snapshot.pairingPhoneNumber}, escolha <strong>Conectar com número de telefone</strong> e digite:</p>
+              <p aria-label="Código de vinculação" className="select-all font-mono text-3xl font-bold tracking-widest text-white">{snapshot.pairingCode?.slice(0, 4)}-{snapshot.pairingCode?.slice(4)}</p>
+              <p className="text-xs text-amber-200">A conexão só será concluída depois da confirmação no celular. O código fica disponível por um minuto.</p>
+            </div>
+          ) : hasQr ? (
             <div className="mx-auto max-w-xs rounded-3xl bg-white p-5"><img src={snapshot.qrCodeDataUrl} alt="QR Code para conectar WhatsApp" className="w-full" /></div>
           ) : (
             <div className="flex min-h-64 flex-col items-center justify-center rounded-3xl border border-dashed border-border/40 bg-black/10 p-8 text-center">
               {snapshot.status === 'connected' ? <Wifi className="h-12 w-12 text-emerald-400" /> : busy ? <RefreshCw className="h-12 w-12 animate-spin text-sky-400" /> : <WifiOff className="h-12 w-12 text-muted-foreground" />}
-              <p className="mt-4 font-display text-sm font-semibold text-white">{snapshot.status === 'connected' ? 'WhatsApp conectado' : busy ? 'Aguardando o WhatsApp…' : 'Nenhum QR Code disponível'}</p>
-              <p className="mt-1 max-w-sm text-xs leading-relaxed text-muted-foreground">{snapshot.status === 'connected' ? 'Abra a Inbox WhatsApp para atender seus clientes.' : busy ? 'O código aparecerá aqui assim que o WhatsApp responder. Depois de escanear, aguarde a confirmação da conexão.' : 'Clique em Gerar QR Code. Se a sessão estiver com erro, use Reiniciar sessão.'}</p>
+              <p className="mt-4 font-display text-sm font-semibold text-white">{snapshot.status === 'connected' ? 'WhatsApp conectado' : snapshot.status === 'pairing' ? 'Celular reconhecido' : busy ? 'Aguardando o WhatsApp…' : 'Nenhum QR Code disponível'}</p>
+              <p className="mt-1 max-w-sm text-xs leading-relaxed text-muted-foreground">{snapshot.status === 'connected' ? 'Abra a Inbox WhatsApp para atender seus clientes.' : snapshot.status === 'pairing' ? 'Aguarde a confirmação final do WhatsApp. Não é preciso escanear novamente.' : busy ? 'Aguarde o código e confirme o vínculo no celular. Esta etapa ainda não permite enviar mensagens.' : 'Clique em Gerar QR Code. Se a sessão estiver com erro, use Reiniciar sessão.'}</p>
             </div>
           )}
           {hasQr ? <p className="text-center text-xs text-muted-foreground">Escaneie com seu WhatsApp em Dispositivos conectados. O código é renovado automaticamente.</p> : null}
           {snapshot.status === 'connected' && snapshot.phoneNumber ? <p className="text-center text-sm text-white">Número conectado: <strong>{snapshot.phoneNumber}</strong></p> : null}
+          {snapshot.detail ? <p role="status" className="text-center text-sm text-muted-foreground">{snapshot.detail}</p> : null}
+          {snapshot.connectedAt && snapshot.status === 'connected' ? <p className="text-center text-xs text-emerald-300">Conexão confirmada pelo WhatsApp em {new Date(snapshot.connectedAt).toLocaleString('pt-BR')}.</p> : null}
           {snapshot.error ? <p className="rounded-xl border border-rose-500/25 bg-rose-500/10 p-3 text-xs text-rose-200">{snapshot.error}</p> : null}
+          {!busy && snapshot.status !== 'connected' && <div className="space-y-3 rounded-xl border border-border/40 p-4">
+            <div className="flex flex-wrap gap-2">
+              <Button variant={usePhone ? 'secondary' : 'default'} onClick={() => setUsePhone(false)} disabled={loading}>Usar QR Code</Button>
+              <Button variant={usePhone ? 'default' : 'secondary'} onClick={() => setUsePhone(true)} disabled={loading}>Conectar pelo número</Button>
+            </div>
+            {usePhone && <form onSubmit={pairByPhone} className="space-y-3">
+              <label htmlFor="wa-pairing-phone" className="block text-sm">Número do WhatsApp com DDD</label>
+              <Input id="wa-pairing-phone" type="tel" autoComplete="tel" placeholder="+55 31 99999-9999" value={phoneNumber} onChange={event => setPhoneNumber(event.target.value)} required maxLength={40} />
+              <p className="text-xs text-muted-foreground">Use o número que vai atender os clientes da academia. O código aparecerá aqui para você digitar no WhatsApp desse celular.</p>
+              <Button type="submit" disabled={loading}>Solicitar código de vinculação</Button>
+            </form>}
+          </div>}
           <div className="flex flex-wrap justify-center gap-2">
-            {snapshot.status !== 'connected' && <Button onClick={connect} disabled={loading || busy}><Smartphone className="mr-2 h-4 w-4" />Gerar QR Code</Button>}
+            {snapshot.status !== 'connected' && !usePhone && <Button onClick={connect} disabled={loading || busy}><Smartphone className="mr-2 h-4 w-4" />Gerar QR Code</Button>}
             {(snapshot.status === 'connected' || busy) && <Button variant="destructive" onClick={disconnect} disabled={loading}><Power className="mr-2 h-4 w-4" />{snapshot.status === 'connected' ? 'Desconectar' : 'Cancelar conexão'}</Button>}
             {!busy && snapshot.status !== 'connected' && <Button variant="secondary" onClick={reset} disabled={loading}>Reiniciar sessão</Button>}
             <Button variant="secondary" onClick={refresh} disabled={loading}><RefreshCw className={cn('mr-2 h-4 w-4', loading && 'animate-spin')} />Atualizar status</Button>
@@ -627,9 +657,9 @@ export function CrmWhatsAppView() {
           <CardHeader><CardTitle className="flex items-center gap-2 text-base"><Link2 className="h-4 w-4 text-emerald-400" />Como conectar</CardTitle></CardHeader>
           <CardContent className="space-y-3 text-sm text-white/75">
             <div className="space-y-2 text-xs text-muted-foreground">
-              <p>1. Clique em <strong className="text-white/80">Gerar QR Code</strong> e aguarde o código aparecer (o servidor sobe junto com o painel, nada para instalar ou rodar à parte).</p>
-              <p>2. No celular: WhatsApp → Configurações → Dispositivos conectados → Conectar dispositivo, e aponte a câmera para o QR.</p>
-              <p>3. A sessão fica salva neste computador — nas próximas vezes conecta sozinho, sem QR.</p>
+              <p>1. Escolha <strong className="text-white/80">Usar QR Code</strong> ou <strong className="text-white/80">Conectar pelo número</strong>. Abra também o WhatsApp no celular que atenderá os clientes.</p>
+              <p>2. No celular: WhatsApp → Dispositivos conectados → Conectar dispositivo. Leia o QR ou toque em Conectar com número de telefone e digite o código mostrado neste painel.</p>
+              <p>3. Aguarde aparecer Conectado e o número do telefone. Gerar ou escanear um código, sozinho, ainda não confirma a conexão. Depois disso, a sessão fica salva neste computador.</p>
               <p>4. Se aparecer erro de sessão, clique em Reiniciar sessão e escaneie o novo código. Mantenha o celular com internet até aparecer Conectado.</p>
             </div>
           </CardContent>

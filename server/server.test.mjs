@@ -29,6 +29,7 @@ const lead={id:'l1',studentName:'Contato real',whatsapp:'+5531999999999',stage:'
 await test('servidor CRM integrado',async t=>{
  await t.test('bloqueia dados, WhatsApp, backup e contas sem autenticação',async()=>{
   for(const path of ['/api/data','/api/whatsapp/status','/api/backup','/api/users'])assert.equal((await request(path)).status,401)
+  assert.equal((await request('/api/whatsapp/pairing-code','POST',{phoneNumber:'5531999999999'})).status,401)
   assert.equal((await request('/api/auth/status','GET',undefined,{}, {origin:'https://evil.test'})).status,403)
  })
  await t.test('configuração única com token local e senha protegida',async()=>{
@@ -55,6 +56,8 @@ await test('servidor CRM integrado',async t=>{
   const added=await request('/api/users','POST',{name:'Treinador',username:'treinador',password:'senha-treinador-segura',role:'trainer',instructorId:''},admin);assert.equal(added.status,200);trainerId=added.data.user.id
   const signed=await request('/api/auth/login','POST',{username:'treinador',password:'senha-treinador-segura'});assert.equal(signed.status,200);trainer={cookie:signed.cookie,csrfToken:signed.data.csrfToken}
   for(const path of ['/api/whatsapp/status','/api/backup','/api/users'])assert.equal((await request(path,'GET',undefined,trainer)).status,403)
+  assert.equal((await request('/api/whatsapp/pairing-code','POST',{phoneNumber:'5531999999999'},trainer)).status,403)
+  assert.equal((await request('/api/whatsapp/pairing-code','POST',{phoneNumber:'bad'},admin)).status,400)
   const loaded=await request('/api/data','GET',undefined,trainer);assert.equal(loaded.data.data.students[0].parentContact,'');assert.equal(loaded.data.data.students[0].monthlyFee,0);assert.deepEqual(loaded.data.data.students[0].paymentHistory,[]);assert.deepEqual(loaded.data.data.crmLeads,[]);assert.deepEqual(loaded.data.data.operationalExpenses,[])
   const poison=structuredClone(loaded.data);poison.data.students[0].monthlyFee=1;assert.equal((await request('/api/data','PUT',poison,trainer)).status,403)
   const update=structuredClone(loaded.data);update.data.students[0].attendanceHistory=[{date:'2026-09-17',slotId:'quinta-0900',status:'present'}];update.data.dailyAttendance={'2026-09-17':{s1:'present'}};assert.equal((await request('/api/data','PUT',update,trainer)).status,200)

@@ -63,3 +63,31 @@ Os dez testes novos exercitam armazenamento no volume da instalação, flush com
 - O avaliador confirmou independentemente os **10 testes específicos aprovados** e não encontrou outro defeito bloqueante no fluxo corrigido.
 - Para chegar a 9/10 operacional: titular parear novamente, confirmar reconexão após reiniciar o serviço e troca real de mensagens. Essas evidências seguem pendentes. Não declarar 100% funcionando enquanto faltarem.
 - Teste adicional do navegador aprovado: acompanhamento após conectado/erro, recuperação acessível, expiração e retirada do QR quando há falha de rede.
+
+## Nova rodada — 26/09/2026
+
+Relato do titular: o QR é lido, mas o WhatsApp do celular não avança. Os registros disponíveis indicavam referências de QR esgotadas (408), sem confirmação de pareamento. Isso não comprova que o QR foi inventado nem que o protocolo foi a causa. O painel local abriu a tela de login durante o diagnóstico; a conta existente e a leitura autenticada das 13 coleções responderam 200.
+
+Correções ativadas:
+
+- Bloqueio de instância por `flock`, recuperável após crash e reinício, com migração cautelosa do bloqueio antigo. A revisão reproduziu o bloqueio indevido causado pelo reaproveitamento de PID.
+- Serviço tenta novamente após montagem tardia do disco externo; instalador reinicia a versão ativa; abertura aguarda o servidor estar pronto.
+- Datas opcionais de próxima ação/follow-up podem ser apagadas sem lançar erro de JavaScript.
+- Alternativa real de pareamento pelo número, acionada somente após o socket estar pronto; código é recebido da biblioteca após envio da solicitação ao WhatsApp. Código disponível, celular reconhecido e conexão confirmada são estados diferentes.
+- Primeiro QR tem janela maior (55 segundos visíveis, dentro dos 60 da biblioteca); os seguintes são retirados antes de expirar. Código não confirmado encerra a tentativa em vez de iniciar um loop de reconexões.
+- Detecção específica de exigência adicional por chave de acesso, sem registrar conteúdo sensível. Exibe limitação real em vez de conexão falsa.
+- Configuração explícita de protocolo `WA_WEB_VERSION`, validada e estável em reconexões. Na instalação local, foi fixada `2.3000.1048570357`, obtida de WhatsApp Web em 26/09/2026. O ensaio de conexão real gerou QR; isso ainda não demonstra que o celular aceitará o vínculo. Configuração local fica fora do Git.
+
+Validação: 46 testes automatizados aprovados; build e lint aprovados (somente aviso de tamanho de bundle). Serviço atualizado e ativo; login existente e leitura do CRM verificados novamente após a instalação. A tela de login também foi verificada no navegador do usuário.
+
+A revisão inicial desta rodada atribuiu 7/10 à disponibilidade local. A nota operacional de WhatsApp não pode ser elevada pela presença de QR ou por testes simulados: ainda falta confirmar pareamento, reconexão com telefone vinculado e mensagens reais. O número solicitado ao titular para conduzir o ensaio por código ainda não foi informado.
+
+Referências de compatibilidade: [documentação de conexão](https://github.com/WhiskeySockets/baileys.wiki-site/blob/main/docs/socket/connecting.md), [configuração de protocolo](https://github.com/WhiskeySockets/baileys.wiki-site/blob/main/docs/socket/configuration.md), [relato de versão/408](https://github.com/WhiskeySockets/Baileys/issues/2777), [relato de verificação por chave de acesso](https://github.com/WhiskeySockets/Baileys/issues/2672). Os relatos são hipóteses de diagnóstico, não confirmação da causa nesta instalação.
+
+### Reavaliação final desta rodada
+
+O avaliador independente atribuiu **7/10 → 9/10 à confiabilidade da inicialização e disponibilidade do painel**. Confirmou correções de bloqueio, retomada após falhas, atualização do serviço e datas opcionais, sem novo bloqueante identificado. Essa nota não é uma aprovação operacional do WhatsApp.
+
+A suíte final passou com **46/46 testes**; o teste de navegador passou por cadastro, recebimentos parciais, duas sessões, recuperação de alterações, criação/login/restrições de treinador, interface de pareamento por número, retirada de códigos vencidos e todas as 19 telas, em desktop e celular. Serviço instalado mostrou ActiveState=active, SubState=running e resposta autenticada 200 para o CRM. O QR da versão de protocolo fixada também foi observado no serviço instalado, sem confirmar pareamento.
+
+**Pendência real:** vínculo no telefone, reconexão depois de reiniciar com sessão pareada e mensagem real de entrada/saída. Não foram realizadas mensagens para clientes durante o trabalho. O ensaio por número pode ser iniciado pelo titular no painel, sem informar o número nesta conversa.

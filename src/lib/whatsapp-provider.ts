@@ -1,17 +1,19 @@
 import { apiRequest, ApiError } from './api'
 import { flushData, refreshData } from './data-sync'
 import type { CrmMessage } from '../types'
-export type WhatsAppConnectionStatus = 'disconnected' | 'waiting_qr' | 'connecting' | 'connected' | 'error'
-export interface WhatsAppConnectionSnapshot { status: WhatsAppConnectionStatus; phoneNumber?: string; qrCodeDataUrl?: string; qrExpiresAt?: string; error?: string }
+export type WhatsAppConnectionStatus = 'disconnected' | 'waiting_qr' | 'waiting_code' | 'pairing' | 'connecting' | 'connected' | 'error'
+export interface WhatsAppConnectionSnapshot { status: WhatsAppConnectionStatus; phoneNumber?: string; qrCodeDataUrl?: string; qrExpiresAt?: string; pairingCode?: string; pairingExpiresAt?: string; pairingPhoneNumber?: string; connectedAt?: string; detail?: string; error?: string }
 export interface WhatsAppProvider {
   getStatus(): Promise<WhatsAppConnectionSnapshot>
   connect(): Promise<WhatsAppConnectionSnapshot>
+  pairWithPhone(phoneNumber: string): Promise<WhatsAppConnectionSnapshot>
   disconnect(): Promise<void>
   sendMessage(leadId: string, content: string, clientMessageId: string): Promise<{externalId: string; message: CrmMessage}>
 }
 export const whatsappProvider: WhatsAppProvider = {
   getStatus: () => apiRequest('/api/whatsapp/status'),
   connect: () => apiRequest('/api/whatsapp/connect', {method: 'POST', body: '{}'}),
+  pairWithPhone: phoneNumber => apiRequest('/api/whatsapp/pairing-code', {method: 'POST', body: JSON.stringify({phoneNumber})}),
   disconnect: async () => { await apiRequest('/api/whatsapp/disconnect', {method: 'POST', body: '{}'}) },
   async sendMessage(leadId, content, clientMessageId) {
     await flushData()

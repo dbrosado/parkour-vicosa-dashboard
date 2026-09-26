@@ -140,3 +140,59 @@ await test('falha ao reiniciar armazenamento nunca mantém status conectado', as
   assert.equal(manager.socket,null);assert.equal(manager.snapshot.status,'error');assert.ok(manager.snapshot.error)
   failReset=false
 })
+await test('vínculo por número espera socket pronto e só aceita código do provedor', async t => {
+  const {manager,sockets} = await fixture(t)
+  await manager.pairWithPhone('5531999999999')
+  assert.equal(manager.snapshot.status,'connecting')
+  assert.equal(manager.snapshot.pairingCode,undefined)
+  let requests=0
+  sockets[0].requestPairingCode=async phone=>{requests++;assert.equal(phone,'5531999999999');return 'ABCD1234'}
+  sockets[0].ev.emit('connection.update',{qr:'provider-reference'})
+  await manager.idle()
+  assert.equal(manager.snapshot.status,'waiting_code')
+  assert.equal(manager.snapshot.pairingCode,'ABCD1234')
+  assert.equal(manager.snapshot.qrCodeDataUrl,undefined)
+  sockets[0].ev.emit('connection.update',{qr:'provider-reference-2'})
+  await manager.idle();assert.equal(requests,1)
+  sockets[0].ev.emit('connection.update',{isNewLogin:true})
+  await manager.idle();assert.equal(manager.snapshot.status,'pairing');assert.equal(manager.snapshot.pairingCode,undefined)
+  await assert.rejects(manager.pairWithPhone('5531999999999'),e=>e.status===409)
+  sockets[0].ev.emit('connection.update',{connection:'open'})
+  await manager.idle();assert.equal(manager.snapshot.status,'connected');assert.ok(manager.snapshot.connectedAt)
+})
+await test('recusa número inválido e limita repetição de códigos sem forjar sucesso', async t => {
+  const {manager,sockets}=await fixture(t)
+  await assert.rejects(manager.pairWithPhone('not-a-number'),e=>e.status===400)
+  assert.equal(sockets.length,0)
+  await manager.pairWithPhone('5531999999999')
+  sockets[0].requestPairingCode=async()=>{throw new Error('Provider refused pairing')}
+  sockets[0].ev.emit('connection.update',{qr:'provider-reference'})
+  await manager.idle();assert.equal(manager.snapshot.status,'error');assert.equal(manager.snapshot.pairingCode,undefined)
+  await assert.rejects(manager.pairWithPhone('5531999999999'),e=>e.status===429)
+})
+await test('QR tem janela inicial maior; timeout sem leitura não reinicia tentativas em loop', async t => {
+  const {manager,sockets}=await fixture(t)
+  await manager.connect()
+  sockets[0].ev.emit('connection.update',{qr:'first'})
+  await manager.idle();assert.ok(Date.parse(manager.snapshot.qrExpiresAt)-Date.now()>50000)
+  sockets[0].ev.emit('connection.update',{qr:'second'})
+  await manager.idle();assert.ok(Date.parse(manager.snapshot.qrExpiresAt)-Date.now()<20000)
+  sockets[0].ev.emit('connection.update',closeEvent(408))
+  await manager.idle();await tick()
+  assert.equal(manager.snapshot.status,'disconnected');assert.match(manager.snapshot.error,/sem confirmação/);assert.equal(sockets.length,1)
+})
+await test('open sem identidade do telefone nunca vira conectado', async t => {
+  const {manager,sockets}=await fixture(t)
+  await manager.connect();sockets[0].user=undefined
+  sockets[0].ev.emit('connection.update',{connection:'open'})
+  await manager.idle();assert.equal(manager.snapshot.status,'error');assert.equal(manager.snapshot.phoneNumber,undefined)
+})
+await test('exigência de chave de acesso informa bloqueio real e nunca sucesso', async t => {
+  const {manager,sockets}=await fixture(t,{makeSocket:state=>{
+    const socket={ev:new EventEmitter(),ws:new EventEmitter(),state,user:{id:'5500000000000:1@s.whatsapp.net'},logout:async()=>{},end:async()=>{}}
+    sockets.push(socket);return socket
+  }})
+  await manager.connect()
+  sockets[0].ws.emit('CB:notification,type:passkey_prologue_request',{})
+  await manager.idle();assert.equal(manager.snapshot.status,'error');assert.match(manager.snapshot.error,/chave de acesso/);assert.equal(manager.socket,null)
+})

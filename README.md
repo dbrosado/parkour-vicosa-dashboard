@@ -16,9 +16,11 @@ Na instalação original, o serviço local foi instalado e ativado. Em uma insta
 
 ## WhatsApp
 
-Em **Conectar WhatsApp**, gere um QR Code. No celular da academia, abra **Dispositivos conectados → Conectar dispositivo** e leia o QR. A tela mostra somente o QR recebido do WhatsApp, retira códigos expirados e acompanha a conexão continuamente. Depois de escanear, aguarde **Conectado**. A sessão é salva no servidor e tenta reconectar após interrupções. Se a sessão estiver inválida, use **Reiniciar sessão** e leia o novo código; essa ação exige novo pareamento, mas preserva os cadastros e o histórico do CRM. A Inbox recebe mensagens novas individuais e cria leads automaticamente quando necessário. Respostas na Inbox ou ficha do lead são enviadas pela conexão; falhas nunca são apresentadas como envio bem-sucedido. Os recibos de entrega/leitura dependem do WhatsApp.
+Em **Conectar WhatsApp**, escolha **Usar QR Code** ou **Conectar pelo número**. No segundo modo, informe o WhatsApp da academia com DDD, solicite o código e digite-o no celular em **Dispositivos conectados → Conectar dispositivo → Conectar com número de telefone**. O código por número vale por um minuto e só pode ser solicitado uma vez por minuto. Para QR, clique em **Gerar QR Code**. No celular da academia, abra **Dispositivos conectados → Conectar dispositivo** e leia o QR. A tela mostra somente o QR recebido do WhatsApp, retira códigos expirados e acompanha a conexão continuamente. Depois de escanear ou digitar o código, aguarde **Conectado**, o número do telefone e a data da confirmação. O estado **Confirmando vínculo** ainda não permite enviar mensagens. Se o código vencer sem confirmação, a tentativa termina e você pode iniciar outra; não há repetição silenciosa indefinida. A sessão é salva no servidor e tenta reconectar após interrupções. Se a sessão estiver inválida, use **Reiniciar sessão** e leia o novo código; essa ação exige novo pareamento, mas preserva os cadastros e o histórico do CRM. A Inbox recebe mensagens novas individuais e cria leads automaticamente quando necessário. Respostas na Inbox ou ficha do lead são enviadas pela conexão; falhas nunca são apresentadas como envio bem-sucedido. Os recibos de entrega/leitura dependem do WhatsApp.
 
 A integração é não oficial, via Baileys/WhatsApp Web. Mudanças no WhatsApp podem exigir atualização. O servidor precisa ficar ligado e conectado à internet. Receber uma mensagem não é autorização geral para campanhas. Envios são individuais. Mídias recebidas são identificadas no histórico; a reprodução de áudio e arquivos ainda deve ser feita pelo WhatsApp no celular. O histórico anterior ao pareamento não é importado em massa.
+
+Se o WhatsApp exigir uma etapa adicional por chave de acesso que a biblioteca não suporta, o painel informa essa limitação e encerra a tentativa. A alternativa por número também depende da aprovação do WhatsApp no celular.
 
 **A validação de ponta a ponta exige o titular parear o telefone e confirmar uma mensagem real de entrada e saída. Testes automatizados não substituem essa etapa.**
 
@@ -33,7 +35,7 @@ A integração é não oficial, via Baileys/WhatsApp Web. Mudanças no WhatsApp 
 
 ## Instalação / desenvolvimento
 
-Requer Node.js 24 e npm. Na pasta do projeto:
+Requer Linux com Node.js 24, npm e `flock` (pacote `util-linux`, normalmente já instalado). O bloqueio do kernel impede duas instâncias de gravarem na mesma base e é liberado automaticamente após um crash ou reinício. Na pasta do projeto:
 
 ```sh
 npm ci
@@ -47,7 +49,7 @@ Para manter rodando e iniciar automaticamente no Linux:
 ./scripts/install-service.sh
 ```
 
-O serviço é `parkour-vicosa.service` do usuário, reinicia em falhas e guarda logs no journal. Para atualizar: `npm ci`, `npm run build`, `systemctl --user restart parkour-vicosa.service`. `scripts/start-panel.sh` abre o painel. Para desligar: `systemctl --user stop parkour-vicosa.service`; para desativar inicialização: `systemctl --user disable parkour-vicosa.service`.
+O serviço é `parkour-vicosa.service` do usuário, reinicia em falhas e guarda logs no journal. Para atualizar: `npm ci`, `npm run build`, `systemctl --user restart parkour-vicosa.service`. `scripts/start-panel.sh` aguarda a resposta válida do servidor antes de abrir o painel. O instalador reinicia o serviço já existente para aplicar a atualização e não desiste permanentemente se o disco externo montar tarde. Para desligar: `systemctl --user stop parkour-vicosa.service`; para desativar inicialização: `systemctl --user disable parkour-vicosa.service`.
 
 Desenvolvimento: `npm run dev` inicia Vite e servidor; pare o serviço antes ou use `CRM_EXTERNAL_SERVER=1 npm run dev` para usar o servidor existente. Todas as rotas `/api` são encaminhadas pelo proxy.
 
@@ -57,7 +59,7 @@ Verificação: `npm test`, `npm run build`, `npm run lint`. Os testes usam pasta
 
 Uma publicação apenas estática (incluindo o antigo frontend da Vercel) não mantém este servidor WhatsApp nem compartilha os dados. Para acesso externo permanente é necessário hospedar o servidor com disco persistente, domínio HTTPS e serviço contínuo, ou usar uma rede privada autenticada. Não exponha a porta HTTP diretamente na internet. O acesso externo não está ativado apenas por compilar o app; configure a hospedagem/rede escolhida e valide de outro aparelho antes de divulgar um endereço.
 
-Variáveis opcionais: `HOST`, `WHATSAPP_PORT`, `DATA_DIR`, `WA_SESSION_DIR`, `CRM_ALLOWED_ORIGINS`, `COOKIE_SECURE`. Em um proxy HTTPS confiável, use `COOKIE_SECURE=true`. Para proxy HTTPS, verifique as configurações de cookie e origem no servidor. Nunca coloque senhas/tokens do servidor em variáveis `VITE_*` ou no repositório.
+Variáveis opcionais: `HOST`, `WHATSAPP_PORT`, `DATA_DIR`, `WA_SESSION_DIR`, `CRM_ALLOWED_ORIGINS`, `COOKIE_SECURE`, `WA_WEB_VERSION`. O serviço lê overrides locais opcionais de `server/data/service.env`, preservados ao reinstalar e ignorados pelo Git. `WA_WEB_VERSION` aceita três inteiros separados por ponto e fixa a versão de comunicação em todas as reconexões; sem ela, usa o padrão da biblioteca. Alterar esse valor é um teste de compatibilidade, não prova de pareamento. Não há atualização de protocolo automática a cada tentativa. Em um proxy HTTPS confiável, use `COOKIE_SECURE=true`. Para proxy HTTPS, verifique as configurações de cookie e origem no servidor. Nunca coloque senhas/tokens do servidor em variáveis `VITE_*` ou no repositório.
 
 
 ## Testes de navegador e conexão real

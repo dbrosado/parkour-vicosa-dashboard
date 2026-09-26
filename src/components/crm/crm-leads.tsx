@@ -215,7 +215,7 @@ function LeadFormModal({
             <Input
               type="datetime-local"
               value={draft.nextActionAt ? new Date(new Date(draft.nextActionAt).getTime() - new Date().getTimezoneOffset() * 60_000).toISOString().slice(0, 16) : ''}
-              onChange={(event) => setValue('nextActionAt', new Date(event.target.value).toISOString())}
+              onChange={(event) => setValue('nextActionAt', event.target.value ? new Date(event.target.value).toISOString() : '')}
             />
           </Field>
           <Field label="Responsável comercial">

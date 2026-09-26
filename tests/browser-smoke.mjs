@@ -96,6 +96,20 @@ try {
  await nav('Conectar WhatsApp')
  await page.getByText('Nenhum QR Code disponível',{exact:true}).waitFor()
  assert.equal(await page.getByAltText('QR Code para conectar WhatsApp').count(),0)
+ await page.getByRole('button',{name:'Conectar pelo número',exact:true}).click()
+ await page.getByLabel('Número do WhatsApp com DDD',{exact:true}).fill('+55 31 99999-9999')
+ await page.route('**/api/whatsapp/pairing-code',async route=>{
+   assert.equal(route.request().postDataJSON().phoneNumber,'+55 31 99999-9999')
+   waStatus={status:'waiting_code',pairingCode:'ABCD1234',pairingPhoneNumber:'+5531999999999',pairingExpiresAt:new Date(Date.now()+60000).toISOString()}
+   await route.fulfill({json:waStatus})
+ })
+ await page.getByRole('button',{name:'Solicitar código de vinculação',exact:true}).click()
+ await page.getByText('ABCD-1234',{exact:true}).waitFor()
+ assert.equal(await page.getByAltText('QR Code para conectar WhatsApp').count(),0)
+ assert.equal(await page.getByText('WhatsApp conectado',{exact:true}).count(),0)
+ waStatus={status:'pairing',detail:'Celular reconhecido. Confirmando a conexão com o WhatsApp…'}
+ await page.getByText('Celular reconhecido',{exact:true}).waitFor()
+ await page.unroute('**/api/whatsapp/pairing-code')
  waStatus = {status:'connected',phoneNumber:'+5500000000000'}
  await page.getByText('WhatsApp conectado',{exact:true}).waitFor()
  waStatus = {status:'error',error:'Sessão inválida no teste'}
